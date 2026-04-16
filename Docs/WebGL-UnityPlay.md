@@ -7,8 +7,8 @@ This project ships to WebGL through Unity Play with two tracked build profiles:
 
 ## Requirements
 
-- The Unity project must be linked to a valid Unity Cloud project.
-- Multiplayer still depends on Unity Authentication, Sessions, and Relay.
+- Photon Fusion 2 must be imported and configured with a valid Photon App ID.
+- `Assets/Photon/Fusion/Resources/NetworkProjectConfig.fusion` should use Fusion Multi-Peer (`PeerMode = Multiple`) for local editor testing.
 - Web builds must be launched from HTTPS through Unity Play, not from `file://`.
 - Unity batch compile and Unity WebGL builds are the source of truth for this project. External `dotnet build` runs against generated Unity `.csproj` files are not a release gate here.
 
@@ -86,5 +86,5 @@ Notes:
 1. Open the Unity Play build in one browser window and host a private match.
 2. Open the same Unity Play build in a second window or browser profile and join by code.
 3. Verify both peers transition from `Bootstrap` into `Joc`.
-4. Verify no Relay transport mismatch warnings appear and the browser build does not expose the legacy `Exit` action.
+4. Verify both peers receive runner avatars, stable red/blue slots, and synchronized round progression.
 5. Repeat with `Web-Release` once `Web-Test` passes.
