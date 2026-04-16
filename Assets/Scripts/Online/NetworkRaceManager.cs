@@ -1,35 +1,54 @@
-using System.Collections;
 using System.Collections.Generic;
-using Unity.Netcode;
+using System.Linq;
+using Fusion;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 namespace RunnerGame.Online
 {
-    public class NetworkRaceManager : MonoBehaviour
+    [RequireComponent(typeof(NetworkObject))]
+    public class NetworkRaceManager : NetworkBehaviour
     {
-        private readonly List<RunnerNetworkPlayer> registeredPlayers = new();
+        private const float RoundAdvanceDelaySeconds = 3f;
+        private const float MatchReturnDelaySeconds = 4f;
+
+        [Networked] private RaceRoundState NetworkRoundState { get; set; }
+        [Networked] private TickTimer PhaseTimer { get; set; }
+
         private LevelCourseDefinition[] courses;
         private ObstacleManager obstacleManager;
-        private RaceRoundState localRoundState = new(1, RaceRoundPhase.WaitingForPlayers, 0d);
+        private RaceRoundState cachedRoundState = RaceRoundState.WaitingForPlayers;
 
         public static NetworkRaceManager Instance { get; private set; }
-        public RaceRoundState RoundState => GetObservedRoundState();
+        public RaceRoundState RoundState => Object != null && Object.IsValid ? NetworkRoundState : cachedRoundState;
 
         private void Awake()
         {
+            courses = LegacySceneAdapter.BuildCourses().ToArray();
+        }
+
+        public override void Spawned()
+        {
             if (Instance != null && Instance != this)
             {
-                Destroy(gameObject);
+                Runner.Despawn(Object);
                 return;
             }
 
             Instance = this;
-            courses = new List<LevelCourseDefinition>(LegacySceneAdapter.BuildCourses()).ToArray();
-            obstacleManager = LegacySceneAdapter.ObstacleManager;
+            obstacleManager = LegacySceneAdapter.ObstacleManager ?? UnityEngine.Object.FindAnyObjectByType<ObstacleManager>(FindObjectsInactive.Include);
+            cachedRoundState = NetworkRoundState;
+
+            if (HasStateAuthority)
+            {
+                NetworkRoundState = RaceRoundState.WaitingForPlayers;
+                PhaseTimer = TickTimer.None;
+            }
+
+            ApplyObservedRoundState(RoundState);
         }
 
-        private void OnDestroy()
+        public override void Despawned(NetworkRunner runner, bool hasState)
         {
             if (Instance == this)
             {
@@ -37,17 +56,38 @@ namespace RunnerGame.Online
             }
         }
 
-        public void RegisterPlayer(RunnerNetworkPlayer player)
+        public override void FixedUpdateNetwork()
         {
-            if (!registeredPlayers.Contains(player))
+            cachedRoundState = RoundState;
+            ApplyObservedRoundState(cachedRoundState);
+
+            if (!HasStateAuthority)
             {
-                registeredPlayers.Add(player);
+                return;
             }
 
-            if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer)
+            int connectedPlayers = Runner.ActivePlayers.Count();
+            if (connectedPlayers < 2)
             {
-                AssignSpawnSlotsServer();
-                TryStartMatchServer();
+                NetworkRoundState = RaceRoundState.WaitingForPlayers;
+                PhaseTimer = TickTimer.None;
+                return;
+            }
+
+            if (!AllPlayersSpawned())
+            {
+                return;
+            }
+
+            if (NetworkRoundState.Phase == RaceRoundPhase.WaitingForPlayers)
+            {
+                StartRound(1);
+                return;
+            }
+
+            if (PhaseTimer.IsRunning && PhaseTimer.Expired(Runner))
+            {
+                AdvancePhaseTimer();
             }
         }
 
@@ -62,142 +102,104 @@ namespace RunnerGame.Online
             return courses[index];
         }
 
-        public void NotifyPlayerFinishedServer(RunnerNetworkPlayer winner)
+        public bool IsPlayerWinner(RunnerNetworkPlayer player)
         {
-            if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer || RoundState.Phase != RaceRoundPhase.Racing)
+            return player != null
+                && RoundState.WinnerPlayer != PlayerRef.None
+                && player.OwnerPlayer == RoundState.WinnerPlayer;
+        }
+
+        public bool IsPlayerLoser(RunnerNetworkPlayer player)
+        {
+            return player != null
+                && RoundState.WinnerPlayer != PlayerRef.None
+                && player.OwnerPlayer != RoundState.WinnerPlayer;
+        }
+
+        [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+        public void RPC_ReportPlayerFinished(PlayerRef player, float pathState)
+        {
+            if (!HasStateAuthority || NetworkRoundState.Phase != RaceRoundPhase.Racing)
             {
                 return;
             }
 
-            RaceRoundState state = RoundState;
-            state.Phase = state.LevelIndex >= courses.Length ? RaceRoundPhase.MatchComplete : RaceRoundPhase.RoundResult;
-            state.WinnerClientId = winner.OwnerClientId;
-            BroadcastRoundStateServer(state);
-
-            foreach (RunnerNetworkPlayer player in registeredPlayers)
-            {
-                bool isWinner = player == winner;
-                player.ApplyRoundResultServer(isWinner, !isWinner);
-            }
-
-            if (state.LevelIndex >= courses.Length)
-            {
-                StartCoroutine(ReturnToBootstrapAfterMatchRoutine());
-            }
-            else
-            {
-                StartCoroutine(AdvanceToNextRoundRoutine(state.LevelIndex + 1));
-            }
-        }
-
-        private void TryStartMatchServer()
-        {
-            registeredPlayers.RemoveAll(player => player == null);
-            if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer || registeredPlayers.Count < 2 || courses == null || courses.Length == 0)
+            RunnerNetworkPlayer winner = FindPlayerFor(player);
+            LevelCourseDefinition course = GetCurrentCourse();
+            if (winner == null || course == null || pathState < course.FinishDistance)
             {
                 return;
             }
 
-            StartRoundServer(1);
+            NetworkRoundState = new RaceRoundState(
+                NetworkRoundState.LevelIndex,
+                NetworkRoundState.LevelIndex >= courses.Length ? RaceRoundPhase.MatchComplete : RaceRoundPhase.RoundResult,
+                Runner.Tick,
+                player);
+
+            PhaseTimer = TickTimer.CreateFromSeconds(
+                Runner,
+                NetworkRoundState.Phase == RaceRoundPhase.MatchComplete ? MatchReturnDelaySeconds : RoundAdvanceDelaySeconds);
         }
 
-        private void AssignSpawnSlotsServer()
+        private void AdvancePhaseTimer()
         {
-            NetworkManager networkManager = NetworkManager.Singleton;
-            if (networkManager == null || !networkManager.IsServer)
+            PhaseTimer = TickTimer.None;
+
+            if (NetworkRoundState.Phase == RaceRoundPhase.MatchComplete)
             {
+                if (Runner.IsSceneAuthority)
+                {
+                    Runner.LoadScene(SceneRef.FromIndex(SceneUtility.GetBuildIndexByScenePath("Assets/Scenes/Bootstrap.unity")), LoadSceneMode.Single);
+                }
+
                 return;
             }
 
-            registeredPlayers.RemoveAll(player => player == null);
-            ulong serverClientId = NetworkManager.ServerClientId;
-            foreach (RunnerNetworkPlayer player in registeredPlayers)
+            if (NetworkRoundState.Phase == RaceRoundPhase.RoundResult)
             {
-                RunnerSpawnSlot slot = player.OwnerClientId == serverClientId
-                    ? RunnerSpawnSlot.Blue
-                    : RunnerSpawnSlot.Red;
-                player.AssignSpawnSlotServer(slot);
+                StartRound(NetworkRoundState.LevelIndex + 1);
             }
         }
 
-        private void StartRoundServer(int levelIndex)
+        private void StartRound(int levelIndex)
         {
-            LevelCourseDefinition course = courses[levelIndex - 1];
-            foreach (RunnerNetworkPlayer player in registeredPlayers)
-            {
-                player.ResetForRoundServer(course);
-            }
+            NetworkRoundState = new RaceRoundState(levelIndex, RaceRoundPhase.Racing, Runner.Tick, PlayerRef.None);
+            PhaseTimer = TickTimer.None;
 
             obstacleManager?.ResetForRound(levelIndex);
             obstacleManager?.SetActiveLevel(levelIndex);
-
-            BroadcastRoundStateServer(new RaceRoundState(
-                levelIndex,
-                RaceRoundPhase.Racing,
-                NetworkManager.Singleton.ServerTime.Time,
-                RaceRoundState.NoWinner));
-        }
-
-        private IEnumerator AdvanceToNextRoundRoutine(int nextLevelIndex)
-        {
-            yield return new WaitForSeconds(3f);
-            if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer)
-            {
-                StartRoundServer(nextLevelIndex);
-            }
-        }
-
-        private IEnumerator ReturnToBootstrapAfterMatchRoutine()
-        {
-            yield return new WaitForSeconds(4f);
-            if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer && NetworkManager.Singleton.SceneManager != null)
-            {
-                NetworkManager.Singleton.SceneManager.LoadScene("Bootstrap", LoadSceneMode.Single);
-            }
-        }
-
-        private void BroadcastRoundStateServer(RaceRoundState state)
-        {
-            localRoundState = state;
-            foreach (RunnerNetworkPlayer player in registeredPlayers)
-            {
-                if (player != null)
-                {
-                    player.SetRoundStateServer(state);
-                }
-            }
-
-            ApplyObservedRoundState(state);
-        }
-
-        private RaceRoundState GetObservedRoundState()
-        {
-            if (RunnerNetworkPlayer.LocalPlayer != null)
-            {
-                localRoundState = RunnerNetworkPlayer.LocalPlayer.SharedRoundState;
-                return localRoundState;
-            }
-
-            foreach (RunnerNetworkPlayer player in registeredPlayers)
-            {
-                if (player != null)
-                {
-                    localRoundState = player.SharedRoundState;
-                    return localRoundState;
-                }
-            }
-
-            return localRoundState;
-        }
-
-        private void Update()
-        {
-            ApplyObservedRoundState(GetObservedRoundState());
         }
 
         private void ApplyObservedRoundState(RaceRoundState current)
         {
-            obstacleManager?.SetActiveLevel(current.LevelIndex);
+            if (current.LevelIndex > 0)
+            {
+                obstacleManager?.SetActiveLevel(current.LevelIndex);
+            }
+        }
+
+        private bool AllPlayersSpawned()
+        {
+            foreach (PlayerRef player in Runner.ActivePlayers)
+            {
+                if (!Runner.TryGetPlayerObject(player, out NetworkObject playerObject) || playerObject == null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private RunnerNetworkPlayer FindPlayerFor(PlayerRef player)
+        {
+            if (!Runner.TryGetPlayerObject(player, out NetworkObject playerObject) || playerObject == null)
+            {
+                return null;
+            }
+
+            return playerObject.GetComponent<RunnerNetworkPlayer>();
         }
     }
 }

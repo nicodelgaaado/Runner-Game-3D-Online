@@ -143,33 +143,6 @@ namespace RunnerGame.Online
             Rigidbody.angularVelocity = Vector3.zero;
         }
 
-        public RunnerMotorSnapshot CaptureSnapshot(bool climbing, bool falling, int receivedInputSequence, int processedInputSequence, int revision)
-        {
-            return new RunnerMotorSnapshot(
-                pathState,
-                Rigidbody.position,
-                Rigidbody.rotation,
-                Rigidbody.linearVelocity,
-                Rigidbody.angularVelocity,
-                Rigidbody.useGravity,
-                climbing,
-                falling,
-                receivedInputSequence,
-                processedInputSequence,
-                revision);
-        }
-
-        public void HardResetFromSnapshot(RunnerMotorSnapshot snapshot)
-        {
-            pathState = snapshot.PathState;
-            Rigidbody.useGravity = snapshot.UseGravity;
-            Rigidbody.position = snapshot.Position;
-            Rigidbody.rotation = snapshot.Rotation;
-            Rigidbody.linearVelocity = snapshot.LinearVelocity;
-            Rigidbody.angularVelocity = snapshot.AngularVelocity;
-            SetSupportDebug(resolved: false, status: "Snapshot", colliderName: "n/a", normalY: 0f);
-        }
-
         private bool TryResolveGroundedTarget(Vector3 pathPosition, Vector3 currentPosition, out Vector3 groundedTargetPosition)
         {
             groundedTargetPosition = default;
