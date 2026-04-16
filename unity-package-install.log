@@ -1,0 +1,14 @@
+[2026-04-14T20:53:20.5224108Z] Codex package installation trigger detected.
+[2026-04-14T20:53:21.0017324Z] Installing package: com.unity.netcode.gameobjects
+[2026-04-14T20:54:00.5421868Z] Installed package: com.unity.netcode.gameobjects
+[2026-04-14T20:54:00.5444598Z] Installing package: com.unity.transport
+[2026-04-14T20:54:07.0913095Z] Installed package: com.unity.transport
+[2026-04-14T20:54:07.0913095Z] Installing package: com.unity.services.multiplayer
+[2026-04-14T20:54:18.8456228Z] Installed package: com.unity.services.multiplayer
+[2026-04-14T20:54:18.8471416Z] Installing package: com.unity.services.authentication
+[2026-04-14T20:54:23.6109602Z] Installed package: com.unity.services.authentication
+[2026-04-14T20:54:23.6273452Z] Installing package: com.unity.services.core
+[2026-04-14T20:54:24.5034546Z] Installed package: com.unity.services.core
+[2026-04-14T20:54:24.5055711Z] Installing package: com.unity.inputsystem
+[2026-04-14T20:54:35.3247175Z] Installed package: com.unity.inputsystem
+[2026-04-14T20:54:38.1145298Z] Required multiplayer packages are installed.
