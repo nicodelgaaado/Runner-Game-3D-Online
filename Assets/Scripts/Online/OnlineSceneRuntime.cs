@@ -28,7 +28,6 @@ namespace RunnerGame.Online
             }
 
             LegacySceneAdapter.InitializeForOnlineScene();
-            EnsureSceneObject<NetworkRaceManager>("NetworkRaceManager");
             EnsureSceneObject<LocalMatchHudController>("LocalMatchHud");
         }
 
