@@ -11,6 +11,11 @@ namespace Fusion {
   using UnityEngine.ResourceManagement.AsyncOperations;
   using UnityEngine.ResourceManagement.ResourceProviders;
 #endif
+#if UNITY_6000_0_OR_NEWER
+  using SceneHandleStorage = System.UInt64;
+#else
+  using SceneHandleStorage = System.Int32;
+#endif
 
   public class NetworkSceneManagerDefault : Fusion.Behaviour, INetworkSceneManager {
     /// <summary>
@@ -588,7 +593,11 @@ namespace Fusion {
         // create a root GO for all the gameObjects in the newly loaded scene
         var newSceneRoot = new GameObject($"[{scene.name}]").AddComponent<MultiPeerSceneRoot>();
         newSceneRoot.SceneRef    = sceneRef;
+#if UNITY_6000_0_OR_NEWER
+        newSceneRoot.SceneHandle = scene.handle.GetRawData();
+#else
         newSceneRoot.SceneHandle = scene.handle;
+#endif
         newSceneRoot.Scene       = scene;
         newSceneRoot.ScenePath   = scene.path;
 
@@ -824,7 +833,7 @@ namespace Fusion {
     protected sealed class MultiPeerSceneRoot : MonoBehaviour {
       public SceneRef SceneRef;
       public string   ScenePath;
-      public int      SceneHandle;
+      public SceneHandleStorage SceneHandle;
       public Scene    Scene;
     }
 

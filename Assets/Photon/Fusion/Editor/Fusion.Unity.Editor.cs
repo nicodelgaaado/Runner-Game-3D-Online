@@ -12321,7 +12321,6 @@ namespace Fusion.Editor {
   using Photon.Realtime;
   using UnityEditor;
   using UnityEngine;
-  using UnityEngine.UI;
 
   public partial class FusionHubWindow {
     /// <summary>

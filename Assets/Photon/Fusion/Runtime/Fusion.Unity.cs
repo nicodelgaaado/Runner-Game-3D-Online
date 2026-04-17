@@ -3741,7 +3741,11 @@ namespace Fusion {
       }
 
       public int GetHashCode(Scene obj) {
+#if UNITY_6000_0_OR_NEWER
+        return obj.handle.GetRawData().GetHashCode();
+#else
         return obj.handle;
+#endif
       }
     }
 
@@ -3898,7 +3902,12 @@ namespace Fusion {
         result.Append("<Invalid>");
       }
 
-      result.Append(", handle:").Append(scene.handle);
+      result.Append(", handle:");
+#if UNITY_6000_0_OR_NEWER
+      result.Append(scene.handle.GetRawData());
+#else
+      result.Append(scene.handle);
+#endif
       result.Append("]");
       return result.ToString();
     }
