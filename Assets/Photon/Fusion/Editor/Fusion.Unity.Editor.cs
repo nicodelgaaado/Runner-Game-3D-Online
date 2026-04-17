@@ -1817,7 +1817,7 @@ namespace Fusion.Editor {
       GameObject go = null;
 
       foreach(var c in components) {
-        var found = UnityEngine.Object.FindFirstObjectByType(c);
+        var found = UnityEngine.Object.FindAnyObjectByType(c);
         if (found)
           continue;
 
@@ -1836,7 +1836,7 @@ namespace Fusion.Editor {
         preferredGameObjectName = typeof(T).Name;
 
       T comp;
-      comp = UnityEngine.Object.FindFirstObjectByType<T>();
+      comp = UnityEngine.Object.FindAnyObjectByType<T>();
       if (comp == null) {
         // T was not found in scene, create a new gameobject and add T, as well as other required components
         if (onThisObject == null)
@@ -2182,7 +2182,11 @@ namespace Fusion.Editor {
       }
       
       (AssetGuid, _) = AssetDatabaseUtils.GetGUIDAndLocalFileIdentifierOrThrow(obj);
+#if UNITY_6000_3_OR_NEWER
+      InstanceID = obj.GetEntityId();
+#else
       InstanceID = obj.GetInstanceID();
+#endif
       AssetName = obj.name;
       IsMainAsset = AssetDatabase.IsMainAsset(obj);
     } 
@@ -7523,7 +7527,11 @@ namespace Fusion.Editor {
               hashCode = HashCodeUtilities.CombineHashCodes(hashCode, p.colorValue.GetHashCode());
               break;
             case SerializedPropertyType.ObjectReference:
+#if UNITY_6000_3_OR_NEWER
+              hashCode = HashCodeUtilities.CombineHashCodes(hashCode, p.objectReferenceEntityIdValue.GetHashCode());
+#else
               hashCode = HashCodeUtilities.CombineHashCodes(hashCode, p.objectReferenceInstanceIDValue);
+#endif
               break;
             case SerializedPropertyType.LayerMask:
               hashCode = HashCodeUtilities.CombineHashCodes(hashCode, p.intValue);
@@ -9928,7 +9936,11 @@ namespace Fusion.Editor {
           return CheckCondition(doIf, compareProperty.longValue);
 
         case SerializedPropertyType.ObjectReference:
+#if UNITY_6000_3_OR_NEWER
+          return CheckCondition(doIf, compareProperty.objectReferenceEntityIdValue.GetHashCode());
+#else
           return CheckCondition(doIf, compareProperty.objectReferenceInstanceIDValue);
+#endif
 
         case SerializedPropertyType.Float:
           return CheckCondition(doIf, compareProperty.doubleValue);
@@ -12159,8 +12171,13 @@ namespace Fusion.Editor {
 
     [RuntimeInitializeOnLoadMethod]
     public static void Initialize() {
+#if UNITY_6000_3_OR_NEWER
+      UnityEditor.EditorApplication.hierarchyWindowItemByEntityIdOnGUI -= HierarchyWindowOverlay;
+      UnityEditor.EditorApplication.hierarchyWindowItemByEntityIdOnGUI += HierarchyWindowOverlay;
+#else
       UnityEditor.EditorApplication.hierarchyWindowItemOnGUI -= HierarchyWindowOverlay;
       UnityEditor.EditorApplication.hierarchyWindowItemOnGUI += HierarchyWindowOverlay;
+#endif
     }
 
     [StaticField(StaticFieldResetMode.None)]
@@ -12176,9 +12193,14 @@ namespace Fusion.Editor {
     [StaticField(StaticFieldResetMode.None)]
     private static GUIContent s_multipleInstancesContent = EditorGUIUtility.IconContent("Warning", "multiple");
 
-    private static void HierarchyWindowOverlay(int instanceId, Rect position) {
+    private static void HierarchyWindowOverlay(
 #if UNITY_6000_3_OR_NEWER
-      var entityId = (EntityId)instanceId;
+      EntityId entityId,
+#else
+      int instanceId,
+#endif
+      Rect position) {
+#if UNITY_6000_3_OR_NEWER
       var obj = UnityEditor.EditorUtility.EntityIdToObject(entityId);
 #else
       var entityId = instanceId;
@@ -12192,7 +12214,11 @@ namespace Fusion.Editor {
       Scene scene = default;
       for (int i = 0; i < SceneManager.sceneCount; ++i) {
         var s = SceneManager.GetSceneAt(i);
+#if UNITY_6000_3_OR_NEWER
+        if (s.handle.GetRawData() == EntityId.ToULong(entityId)) {
+#else
         if (s.handle == entityId) {
+#endif
           scene = s;
           break;
         }
@@ -12240,7 +12266,11 @@ namespace Fusion.Editor {
               if (!otherScene.IsValid()) {
                 continue;
               }
+#if UNITY_6000_3_OR_NEWER
+              if (otherScene.handle.GetRawData() == EntityId.ToULong(entityId)) {
+#else
               if (otherScene.handle == instanceId) {
+#endif
                 menu.AddItem(MakeRunnerContent(runner), false, () => {
                   EditorGUIUtility.PingObject(runner);
                   Selection.activeObject = runner;
@@ -12788,7 +12818,7 @@ namespace Fusion.Editor {
     [MenuItem("GameObject/Fusion/Scene/Setup Multi-Peer AudioListener Handling", false, FusionAssistants.PRIORITY + 1)]
     public static void HandleAudioListeners() {
       int count = 0;
-      foreach (var listener in Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)) {
+      foreach (var listener in Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Exclude)) {
         count++;
         listener.EnsureComponentHasVisibilityNode();
       }
@@ -12799,7 +12829,7 @@ namespace Fusion.Editor {
     [MenuItem("GameObject/Fusion/Scene/Setup Multi-Peer Lights Handling", false, FusionAssistants.PRIORITY + 1)]
     public static void HandleLights() {
       int count = 0;
-      foreach (var listener in Object.FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)) {
+      foreach (var listener in Object.FindObjectsByType<Light>(FindObjectsInactive.Exclude)) {
         count++;
         listener.EnsureComponentHasVisibilityNode();
       }
@@ -15119,7 +15149,7 @@ namespace Fusion.Editor {
     static List<NetworkRunner> reusableRunnerList = new List<NetworkRunner>();
 
     public static NetworkRunner[] FindActiveRunners() {
-      var runners = Object.FindObjectsByType<NetworkRunner>(FindObjectsInactive.Exclude, FindObjectsSortMode.InstanceID);
+      var runners = Object.FindObjectsByType<NetworkRunner>(FindObjectsInactive.Exclude);
       reusableRunnerList.Clear();
       for (int i = 0; i < runners.Length; ++i) {
         if (runners[i].IsRunning)
@@ -15132,7 +15162,7 @@ namespace Fusion.Editor {
     }
 
     public static void FindActiveRunners(List<NetworkRunner> nonalloc) {
-      var runners = Object.FindObjectsByType<NetworkRunner>(FindObjectsInactive.Exclude, FindObjectsSortMode.InstanceID);
+      var runners = Object.FindObjectsByType<NetworkRunner>(FindObjectsInactive.Exclude);
       nonalloc.Clear();
       for (int i = 0; i < runners.Length; ++i) {
         if (runners[i].IsRunning)

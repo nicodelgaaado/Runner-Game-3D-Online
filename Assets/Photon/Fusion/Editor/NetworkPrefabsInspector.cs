@@ -259,7 +259,7 @@ namespace Fusion.Editor {
         if (anyInstances) {
           menu.AddItem(selectInstancesContent, false, () => {
             var lookup = new HashSet<NetworkObjectTypeId>(selection.Select(x => NetworkObjectTypeId.FromPrefabId(x)));
-            Selection.objects = FindObjectsByType<NetworkObject>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+            Selection.objects = FindObjectsByType<NetworkObject>(FindObjectsInactive.Include)
              .Where(x => x.NetworkTypeId.IsValid && lookup.Contains(x.NetworkTypeId))
              .Select(x => x.gameObject)
              .ToArray();
