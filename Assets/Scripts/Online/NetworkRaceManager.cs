@@ -148,7 +148,7 @@ namespace RunnerGame.Online
 
             if (NetworkRoundState.Phase == RaceRoundPhase.MatchComplete)
             {
-                if (Runner.IsSceneAuthority)
+                if (Runner.IsSharedModeMasterClient || Runner.IsSceneAuthority)
                 {
                     Runner.LoadScene(SceneRef.FromIndex(SceneUtility.GetBuildIndexByScenePath("Assets/Scenes/Bootstrap.unity")), LoadSceneMode.Single);
                 }

@@ -1,6 +1,7 @@
 using Fusion;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 
 namespace RunnerGame.Online
 {
@@ -26,7 +27,7 @@ namespace RunnerGame.Online
 
             RaceRoundState state = NetworkRaceManager.Instance.RoundState;
             NetworkRunner runner = SessionRuntime.Runner;
-            float hudHeight = Debug.isDebugBuild ? 340f : 160f;
+            float hudHeight = Debug.isDebugBuild ? 380f : 160f;
             GUILayout.BeginArea(new Rect(20f, 20f, 340f, hudHeight), GUI.skin.box);
             GUILayout.Label("Online Race");
             GUILayout.Label($"Level: {state.LevelIndex}");
@@ -46,8 +47,10 @@ namespace RunnerGame.Online
                 GUILayout.Label($"Has Input Authority: {RunnerNetworkPlayer.LocalPlayer.HasInputAuthority}");
                 GUILayout.Label($"Is Scene Authority: {runner.IsSceneAuthority}");
                 GUILayout.Label($"Is Master Client: {runner.IsSharedModeMasterClient}");
+                GUILayout.Label($"Drives Scene Load: {runner.IsSharedModeMasterClient || runner.IsSceneAuthority}");
                 GUILayout.Label($"Runner State: {runner.State}");
                 GUILayout.Label($"Session Name: {sessionName}");
+                GUILayout.Label($"Active Scene: {SceneManager.GetActiveScene().name}");
                 GUILayout.Label($"Respawning: {RunnerNetworkPlayer.LocalPlayer.IsRespawning}");
                 GUILayout.Label($"Path State: {RunnerNetworkPlayer.LocalPlayer.ReplicatedPathState:F2}");
                 GUILayout.Label($"Local Y: {RunnerNetworkPlayer.LocalPlayer.LocalPositionY:F3}");
