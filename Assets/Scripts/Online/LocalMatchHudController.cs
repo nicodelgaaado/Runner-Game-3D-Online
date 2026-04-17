@@ -36,6 +36,10 @@ namespace RunnerGame.Online
 
             if (Debug.isDebugBuild && runner != null)
             {
+                string sessionName = runner.SessionInfo.IsValid && !string.IsNullOrWhiteSpace(runner.SessionInfo.Name)
+                    ? runner.SessionInfo.Name
+                    : SessionRuntime.SessionCode;
+
                 GUILayout.Label($"Local PlayerRef: {runner.LocalPlayer}");
                 GUILayout.Label($"Owner PlayerRef: {RunnerNetworkPlayer.LocalPlayer.OwnerPlayer}");
                 GUILayout.Label($"Has State Authority: {RunnerNetworkPlayer.LocalPlayer.HasStateAuthority}");
@@ -43,7 +47,7 @@ namespace RunnerGame.Online
                 GUILayout.Label($"Is Scene Authority: {runner.IsSceneAuthority}");
                 GUILayout.Label($"Is Master Client: {runner.IsSharedModeMasterClient}");
                 GUILayout.Label($"Runner State: {runner.State}");
-                GUILayout.Label($"Session Name: {runner.SessionInfo.Name}");
+                GUILayout.Label($"Session Name: {sessionName}");
                 GUILayout.Label($"Respawning: {RunnerNetworkPlayer.LocalPlayer.IsRespawning}");
                 GUILayout.Label($"Path State: {RunnerNetworkPlayer.LocalPlayer.ReplicatedPathState:F2}");
                 GUILayout.Label($"Local Y: {RunnerNetworkPlayer.LocalPlayer.LocalPositionY:F3}");
