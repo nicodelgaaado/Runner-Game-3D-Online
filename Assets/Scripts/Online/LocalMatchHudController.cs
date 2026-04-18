@@ -27,7 +27,7 @@ namespace RunnerGame.Online
 
             RaceRoundState state = NetworkRaceManager.Instance.RoundState;
             NetworkRunner runner = SessionRuntime.Runner;
-            float hudHeight = Debug.isDebugBuild ? 410f : 160f;
+            float hudHeight = Debug.isDebugBuild ? 490f : 160f;
             GUILayout.BeginArea(new Rect(20f, 20f, 340f, hudHeight), GUI.skin.box);
             GUILayout.Label("Online Race");
             GUILayout.Label($"Level: {state.LevelIndex}");
@@ -43,6 +43,10 @@ namespace RunnerGame.Online
 
                 GUILayout.Label($"Local PlayerRef: {runner.LocalPlayer}");
                 GUILayout.Label($"Owner PlayerRef: {RunnerNetworkPlayer.LocalPlayer.OwnerPlayer}");
+                GUILayout.Label($"Replicated Owner PlayerRef: {RunnerNetworkPlayer.LocalPlayer.ReplicatedOwnerPlayerRef}");
+                GUILayout.Label($"Replicated Slot: {RunnerNetworkPlayer.LocalPlayer.ReplicatedSpawnSlotValue}");
+                GUILayout.Label($"Input Authority PlayerRef: {RunnerNetworkPlayer.LocalPlayer.InputAuthorityPlayer}");
+                GUILayout.Label($"State Authority PlayerRef: {RunnerNetworkPlayer.LocalPlayer.StateAuthorityPlayer}");
                 GUILayout.Label($"Has State Authority: {RunnerNetworkPlayer.LocalPlayer.HasStateAuthority}");
                 GUILayout.Label($"Has Input Authority: {RunnerNetworkPlayer.LocalPlayer.HasInputAuthority}");
                 GUILayout.Label($"Is Scene Authority: {runner.IsSceneAuthority}");

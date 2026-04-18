@@ -65,17 +65,17 @@ namespace RunnerGame.Online
             }
         }
 
-        public void ResetForLevel(LevelCourseDefinition course)
+        public void ResetForLevel(LevelCourseDefinition course, RunnerSpawnSlot slot)
         {
             pathState = 0f;
             Rigidbody.useGravity = true;
             ClearPhysicsMotion();
-            Rigidbody.position = course.PathCreator.path.GetPointAtDistance(0f);
+            Rigidbody.position = course.GetOnlinePathPosition(0f, slot);
             Rigidbody.rotation = course.StartRotation;
             SetSupportDebug(resolved: false, status: "Reset", colliderName: "n/a", normalY: 0f);
         }
 
-        public bool Tick(LevelCourseDefinition course, bool moveHeld, Action onFinish, float deltaTime)
+        public bool Tick(LevelCourseDefinition course, RunnerSpawnSlot slot, bool moveHeld, Action onFinish, float deltaTime)
         {
             if (!moveHeld)
             {
@@ -89,8 +89,8 @@ namespace RunnerGame.Online
                 return false;
             }
 
-            Vector3 pathPosition = course.PathCreator.path.GetPointAtDistance(pathState);
-            Vector3 nextPosition = course.PathCreator.path.GetPointAtDistance(Mathf.Min(pathState * 1.01f, course.FinishDistance));
+            Vector3 pathPosition = course.GetOnlinePathPosition(pathState, slot);
+            Vector3 targetForward = course.GetOnlineForward(pathState);
             if (course.HasClimbSegment && pathState > course.ClimbStartDistance)
             {
                 ClearPhysicsMotion();
@@ -102,7 +102,6 @@ namespace RunnerGame.Online
 
             Vector3 currentPosition = Rigidbody.position;
             bool hasSupport = TryResolveGroundedTarget(pathPosition, currentPosition, out Vector3 targetPosition);
-            Vector3 targetForward = Vector3.ProjectOnPlane(nextPosition - pathPosition, Vector3.up);
 
             Rigidbody.useGravity = true;
             if (!hasSupport)

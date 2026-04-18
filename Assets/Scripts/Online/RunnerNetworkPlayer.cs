@@ -24,6 +24,8 @@ namespace RunnerGame.Online
         [Networked] private NetworkBool FallingState { get; set; }
         [Networked] private NetworkBool ClimbingState { get; set; }
         [Networked] private TickTimer RespawnTimer { get; set; }
+        [Networked] private PlayerRef ReplicatedOwnerPlayer { get; set; }
+        [Networked] private RunnerSpawnSlot ReplicatedSpawnSlot { get; set; }
 
         private RunnerMotor motor;
         private RunnerInputAdapter inputAdapter;
@@ -33,30 +35,18 @@ namespace RunnerGame.Online
         private RunnerSpawnSlot lastVisualSlot = RunnerSpawnSlot.None;
         private bool finishReportedForRound;
         private bool initialPlacementApplied;
+        private bool warnedMissingReplicatedSlot;
+        private bool warnedMissingVisualPrototype;
 
         public static RunnerNetworkPlayer LocalPlayer { get; private set; }
 
-        public RunnerSpawnSlot SpawnSlot
-        {
-            get
-            {
-                if (Runner == null || Object == null)
-                {
-                    return RunnerSpawnSlot.None;
-                }
-
-                PlayerRef owner = OwnerPlayer;
-                if (!Runner.IsPlayerValid(owner))
-                {
-                    return RunnerSpawnSlot.None;
-                }
-
-                return owner == Runner.GetMasterClient() ? RunnerSpawnSlot.Blue : RunnerSpawnSlot.Red;
-            }
-        }
-
-        public PlayerRef OwnerPlayer => Object != null ? Object.StateAuthority : PlayerRef.None;
-        public bool IsLocalControlled => Object != null && Object.StateAuthority == Runner.LocalPlayer;
+        public RunnerSpawnSlot SpawnSlot => ReplicatedSpawnSlot;
+        public PlayerRef OwnerPlayer => ReplicatedOwnerPlayer;
+        public PlayerRef ReplicatedOwnerPlayerRef => ReplicatedOwnerPlayer;
+        public RunnerSpawnSlot ReplicatedSpawnSlotValue => ReplicatedSpawnSlot;
+        public PlayerRef InputAuthorityPlayer => Object != null ? Object.InputAuthority : PlayerRef.None;
+        public PlayerRef StateAuthorityPlayer => Object != null ? Object.StateAuthority : PlayerRef.None;
+        public bool IsLocalControlled => Object != null && Runner != null && (HasInputAuthority || Object.InputAuthority == Runner.LocalPlayer);
         public bool IsSceneAuthorityRole => Runner != null && Runner.IsSceneAuthority;
         public float LocalPositionY => motor != null ? motor.Rigidbody.position.y : 0f;
         public bool HasGroundSupport => motor != null && motor.HasGroundSupport;
@@ -79,14 +69,21 @@ namespace RunnerGame.Online
         {
             lastObservedRoundState = RaceRoundState.WaitingForPlayers;
             initialPlacementApplied = false;
+            EnsureReplicatedIdentityInitialized();
 
             if (IsLocalControlled)
             {
                 LocalPlayer = this;
                 cameraBinder.enabled = true;
-                if (Runner.IsPlayerValid(Runner.LocalPlayer))
+                PlayerRef owner = OwnerPlayer;
+                if (!Runner.IsPlayerValid(owner) && Runner != null && Runner.IsPlayerValid(Runner.LocalPlayer))
                 {
-                    Runner.SetPlayerObject(Runner.LocalPlayer, Object);
+                    owner = Runner.LocalPlayer;
+                }
+
+                if (Runner.IsPlayerValid(owner))
+                {
+                    Runner.SetPlayerObject(owner, Object);
                 }
             }
             else
@@ -115,6 +112,7 @@ namespace RunnerGame.Online
 
         public override void FixedUpdateNetwork()
         {
+            EnsureReplicatedIdentityInitialized();
             TryApplyInitialPlacement();
 
             if (NetworkRaceManager.Instance == null)
@@ -156,7 +154,7 @@ namespace RunnerGame.Online
             RunnerInputState inputState = default;
             bool moveHeld = GetInput(out inputState) && inputState.MoveHeld;
 
-            bool climbing = motor.Tick(currentCourse, moveHeld, NotifyFinishedIfNeeded, Runner.DeltaTime);
+            bool climbing = motor.Tick(currentCourse, SpawnSlot, moveHeld, NotifyFinishedIfNeeded, Runner.DeltaTime);
             ClimbingState = climbing;
             MovingState = moveHeld && !climbing;
 
@@ -196,6 +194,7 @@ namespace RunnerGame.Online
                 ConfigurePlayerCollisionLayers();
             }
 
+            ReportPresentationWarnings(slot);
             RefreshPresentation();
         }
 
@@ -258,6 +257,7 @@ namespace RunnerGame.Online
 
         private void ResetForCurrentRound(LevelCourseDefinition course)
         {
+            EnsureReplicatedIdentityInitialized();
             ApplyCourseStartPlacement(course);
             RespawnTimer = TickTimer.None;
             MovingState = false;
@@ -275,10 +275,16 @@ namespace RunnerGame.Online
                 return;
             }
 
+            PlayerRef owner = OwnerPlayer;
+            if (!Runner.IsPlayerValid(owner))
+            {
+                return;
+            }
+
             finishReportedForRound = true;
             MovingState = false;
             ClimbingState = false;
-            NetworkRaceManager.Instance.RPC_ReportPlayerFinished(OwnerPlayer, motor.PathState);
+            NetworkRaceManager.Instance.RPC_ReportPlayerFinished(owner, motor.PathState);
         }
 
         private void StartRespawn()
@@ -309,11 +315,12 @@ namespace RunnerGame.Online
         {
             int redCollisionLayer = LayerMask.NameToLayer(RedCollisionLayerName);
             int blueCollisionLayer = LayerMask.NameToLayer(BlueCollisionLayerName);
+            RunnerSpawnSlot slot = SpawnSlot;
 
-            if (redCollisionLayer >= 0 && blueCollisionLayer >= 0)
+            if (slot != RunnerSpawnSlot.None && redCollisionLayer >= 0 && blueCollisionLayer >= 0)
             {
                 Physics.IgnoreLayerCollision(redCollisionLayer, blueCollisionLayer, true);
-                gameObject.layer = SpawnSlot == RunnerSpawnSlot.Blue ? blueCollisionLayer : redCollisionLayer;
+                gameObject.layer = slot == RunnerSpawnSlot.Blue ? blueCollisionLayer : redCollisionLayer;
             }
         }
 
@@ -381,6 +388,7 @@ namespace RunnerGame.Online
                 return;
             }
 
+            EnsureReplicatedIdentityInitialized();
             LevelCourseDefinition course = ResolveCurrentCourse();
             if (course == null || course.PathCreator == null)
             {
@@ -388,8 +396,12 @@ namespace RunnerGame.Online
             }
 
             ApplyCourseStartPlacement(course);
+            if (!initialPlacementApplied)
+            {
+                return;
+            }
+
             SyncNetworkStateFromMotor();
-            initialPlacementApplied = true;
         }
 
         private LevelCourseDefinition ResolveCurrentCourse()
@@ -423,13 +435,123 @@ namespace RunnerGame.Online
 
         private void ApplyCourseStartPlacement(LevelCourseDefinition course)
         {
-            if (course == null)
+            if (course == null || SpawnSlot == RunnerSpawnSlot.None)
             {
                 return;
             }
 
-            motor.ResetForLevel(course);
+            motor.ResetForLevel(course, SpawnSlot);
             initialPlacementApplied = true;
+        }
+
+        private void EnsureReplicatedIdentityInitialized()
+        {
+            if (!HasStateAuthority || Runner == null || Object == null)
+            {
+                return;
+            }
+
+            if (Runner.IsPlayerValid(ReplicatedOwnerPlayer) && ReplicatedSpawnSlot != RunnerSpawnSlot.None)
+            {
+                return;
+            }
+
+            PlayerRef resolvedOwner = ResolveAuthoritativeOwner();
+            if (!Runner.IsPlayerValid(resolvedOwner))
+            {
+                return;
+            }
+
+            ReplicatedOwnerPlayer = resolvedOwner;
+            ReplicatedSpawnSlot = ResolveSlotForOwner(resolvedOwner);
+        }
+
+        private void ReportPresentationWarnings(RunnerSpawnSlot slot)
+        {
+            if (!Debug.isDebugBuild)
+            {
+                return;
+            }
+
+            if (slot == RunnerSpawnSlot.None)
+            {
+                if (!warnedMissingReplicatedSlot)
+                {
+                    Debug.LogWarning(
+                        $"[RunnerNetworkPlayer] Rendered without replicated slot. object={name} owner={OwnerPlayer} inputAuthority={InputAuthorityPlayer} stateAuthority={StateAuthorityPlayer} hasStateAuthority={HasStateAuthority} hasInputAuthority={HasInputAuthority}");
+                    warnedMissingReplicatedSlot = true;
+                }
+            }
+            else
+            {
+                warnedMissingReplicatedSlot = false;
+            }
+
+            if (slot != RunnerSpawnSlot.None && presentation != null && !presentation.HasActiveVisual)
+            {
+                if (!warnedMissingVisualPrototype)
+                {
+                    Debug.LogWarning(
+                        $"[RunnerNetworkPlayer] Missing visual prototype for slot {slot}. object={name} owner={OwnerPlayer} inputAuthority={InputAuthorityPlayer} stateAuthority={StateAuthorityPlayer}");
+                    warnedMissingVisualPrototype = true;
+                }
+            }
+            else
+            {
+                warnedMissingVisualPrototype = false;
+            }
+        }
+
+        private PlayerRef ResolveAuthoritativeOwner()
+        {
+            if (Runner == null || Object == null)
+            {
+                return PlayerRef.None;
+            }
+
+            if (HasInputAuthority && Runner.IsPlayerValid(Runner.LocalPlayer))
+            {
+                return Runner.LocalPlayer;
+            }
+
+            PlayerRef inputAuthority = Object.InputAuthority;
+            if (Runner.IsPlayerValid(inputAuthority))
+            {
+                return inputAuthority;
+            }
+
+            PlayerRef stateAuthority = Object.StateAuthority;
+            if (Runner.IsPlayerValid(stateAuthority))
+            {
+                return stateAuthority;
+            }
+
+            if (stateAuthority.IsMasterClient)
+            {
+                PlayerRef masterClient = Runner.GetMasterClient();
+                if (Runner.IsPlayerValid(masterClient))
+                {
+                    return masterClient;
+                }
+            }
+
+            return PlayerRef.None;
+        }
+
+        private RunnerSpawnSlot ResolveSlotForOwner(PlayerRef owner)
+        {
+            if (Runner == null || !Runner.IsPlayerValid(owner))
+            {
+                return RunnerSpawnSlot.None;
+            }
+
+            PlayerRef masterClient = Runner.GetMasterClient();
+            if (!Runner.IsPlayerValid(masterClient))
+            {
+                return RunnerSpawnSlot.None;
+            }
+
+            return owner == masterClient ? RunnerSpawnSlot.Blue : RunnerSpawnSlot.Red;
         }
 
         private static Quaternion SanitizeQuaternion(Quaternion rotation)

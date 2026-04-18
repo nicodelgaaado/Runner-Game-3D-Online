@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Linq;
 using Fusion;
 using UnityEngine;
@@ -107,6 +106,7 @@ namespace RunnerGame.Online
         public bool IsPlayerWinner(RunnerNetworkPlayer player)
         {
             return player != null
+                && player.OwnerPlayer != PlayerRef.None
                 && RoundState.WinnerPlayer != PlayerRef.None
                 && player.OwnerPlayer == RoundState.WinnerPlayer;
         }
@@ -114,6 +114,7 @@ namespace RunnerGame.Online
         public bool IsPlayerLoser(RunnerNetworkPlayer player)
         {
             return player != null
+                && player.OwnerPlayer != PlayerRef.None
                 && RoundState.WinnerPlayer != PlayerRef.None
                 && player.OwnerPlayer != RoundState.WinnerPlayer;
         }
@@ -121,7 +122,7 @@ namespace RunnerGame.Online
         [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
         public void RPC_ReportPlayerFinished(PlayerRef player, float pathState)
         {
-            if (!HasStateAuthority || NetworkRoundState.Phase != RaceRoundPhase.Racing)
+            if (!HasStateAuthority || NetworkRoundState.Phase != RaceRoundPhase.Racing || !Runner.IsPlayerValid(player))
             {
                 return;
             }
@@ -197,10 +198,8 @@ namespace RunnerGame.Online
         {
             foreach (PlayerRef player in Runner.ActivePlayers)
             {
-                if (!Runner.TryGetPlayerObject(player, out NetworkObject playerObject)
-                    || playerObject == null
-                    || !playerObject.IsValid
-                    || playerObject.GetComponent<RunnerNetworkPlayer>() == null)
+                RunnerNetworkPlayer networkPlayer = FindPlayerFor(player);
+                if (networkPlayer == null || networkPlayer.SpawnSlot == RunnerSpawnSlot.None)
                 {
                     return false;
                 }
@@ -211,12 +210,25 @@ namespace RunnerGame.Online
 
         private RunnerNetworkPlayer FindPlayerFor(PlayerRef player)
         {
-            if (!Runner.TryGetPlayerObject(player, out NetworkObject playerObject) || playerObject == null)
+            if (!Runner.IsPlayerValid(player))
             {
                 return null;
             }
 
-            return playerObject.GetComponent<RunnerNetworkPlayer>();
+            foreach (RunnerNetworkPlayer networkPlayer in UnityEngine.Object.FindObjectsByType<RunnerNetworkPlayer>(FindObjectsInactive.Exclude))
+            {
+                if (networkPlayer == null || networkPlayer.Object == null || !networkPlayer.Object.IsValid)
+                {
+                    continue;
+                }
+
+                if (networkPlayer.OwnerPlayer == player)
+                {
+                    return networkPlayer;
+                }
+            }
+
+            return null;
         }
     }
 }
