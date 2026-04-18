@@ -11,6 +11,8 @@ namespace RunnerGame.Online
     {
         private const float RoundAdvanceDelaySeconds = 3f;
         private const float MatchReturnDelaySeconds = 4f;
+        private const string BootstrapSceneName = "Bootstrap";
+        private const string BootstrapScenePath = "Assets/Scenes/Bootstrap.unity";
 
         [Networked] private RaceRoundState NetworkRoundState { get; set; }
         [Networked] private TickTimer PhaseTimer { get; set; }
@@ -150,7 +152,19 @@ namespace RunnerGame.Online
             {
                 if (Runner.IsSharedModeMasterClient || Runner.IsSceneAuthority)
                 {
-                    Runner.LoadScene(SceneRef.FromIndex(SceneUtility.GetBuildIndexByScenePath("Assets/Scenes/Bootstrap.unity")), LoadSceneMode.Single);
+                    if (OnlineBuildSceneResolver.TryResolveSceneRef(
+                        BootstrapSceneName,
+                        BootstrapScenePath,
+                        out SceneRef bootstrapSceneRef,
+                        out _))
+                    {
+                        Runner.LoadScene(bootstrapSceneRef, LoadSceneMode.Single);
+                    }
+                    else
+                    {
+                        Debug.LogError(
+                            $"[NetworkRaceManager] Failed to resolve Bootstrap scene for match return. buildStamp={OnlineBuildSceneResolver.GetBuildStamp()} buildScenes=[{OnlineBuildSceneResolver.DescribeBuildScenes()}]");
+                    }
                 }
 
                 return;
@@ -183,7 +197,10 @@ namespace RunnerGame.Online
         {
             foreach (PlayerRef player in Runner.ActivePlayers)
             {
-                if (!Runner.TryGetPlayerObject(player, out NetworkObject playerObject) || playerObject == null)
+                if (!Runner.TryGetPlayerObject(player, out NetworkObject playerObject)
+                    || playerObject == null
+                    || !playerObject.IsValid
+                    || playerObject.GetComponent<RunnerNetworkPlayer>() == null)
                 {
                     return false;
                 }

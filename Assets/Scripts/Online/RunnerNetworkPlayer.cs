@@ -32,6 +32,7 @@ namespace RunnerGame.Online
         private RaceRoundState lastObservedRoundState;
         private RunnerSpawnSlot lastVisualSlot = RunnerSpawnSlot.None;
         private bool finishReportedForRound;
+        private bool initialPlacementApplied;
 
         public static RunnerNetworkPlayer LocalPlayer { get; private set; }
 
@@ -64,6 +65,7 @@ namespace RunnerGame.Online
         public float GroundSupportNormalY => motor != null ? motor.LastSupportNormalY : 0f;
         public float ReplicatedPathState => PathStateValue;
         public bool IsRespawning => RespawnTimer.IsRunning;
+        public bool HasActiveCameraBinding => cameraBinder != null && cameraBinder.HasActiveCameraBinding;
 
         private void Awake()
         {
@@ -76,11 +78,16 @@ namespace RunnerGame.Online
         public override void Spawned()
         {
             lastObservedRoundState = RaceRoundState.WaitingForPlayers;
+            initialPlacementApplied = false;
 
             if (IsLocalControlled)
             {
                 LocalPlayer = this;
                 cameraBinder.enabled = true;
+                if (Runner.IsPlayerValid(Runner.LocalPlayer))
+                {
+                    Runner.SetPlayerObject(Runner.LocalPlayer, Object);
+                }
             }
             else
             {
@@ -90,6 +97,7 @@ namespace RunnerGame.Online
             motor.ConfigureNetworkRolePresentation(isAuthoritativeInstance: HasStateAuthority, isPredictedOwnerInstance: false);
             ConfigurePlayerCollisionLayers();
             IgnoreOtherPlayerCollisions();
+            TryApplyInitialPlacement();
             RefreshPresentation();
         }
 
@@ -102,10 +110,13 @@ namespace RunnerGame.Online
             }
 
             lastVisualSlot = RunnerSpawnSlot.None;
+            initialPlacementApplied = false;
         }
 
         public override void FixedUpdateNetwork()
         {
+            TryApplyInitialPlacement();
+
             if (NetworkRaceManager.Instance == null)
             {
                 return;
@@ -247,7 +258,7 @@ namespace RunnerGame.Online
 
         private void ResetForCurrentRound(LevelCourseDefinition course)
         {
-            motor.ResetForLevel(course);
+            ApplyCourseStartPlacement(course);
             RespawnTimer = TickTimer.None;
             MovingState = false;
             FallingState = false;
@@ -282,15 +293,16 @@ namespace RunnerGame.Online
         {
             PathStateValue = motor.PathState;
             NetworkPosition = motor.Rigidbody.position;
-            NetworkRotation = motor.Rigidbody.rotation;
+            NetworkRotation = SanitizeQuaternion(motor.Rigidbody.rotation);
         }
 
         private void ApplyRemoteTransform()
         {
             motor.ConfigureNetworkRolePresentation(isAuthoritativeInstance: false, isPredictedOwnerInstance: false);
-            transform.SetPositionAndRotation(NetworkPosition, NetworkRotation);
+            Quaternion sanitizedRotation = SanitizeQuaternion(NetworkRotation, transform.rotation);
+            transform.SetPositionAndRotation(NetworkPosition, sanitizedRotation);
             motor.Rigidbody.position = NetworkPosition;
-            motor.Rigidbody.rotation = NetworkRotation;
+            motor.Rigidbody.rotation = sanitizedRotation;
         }
 
         private void ConfigurePlayerCollisionLayers()
@@ -360,6 +372,85 @@ namespace RunnerGame.Online
                 default:
                     return false;
             }
+        }
+
+        private void TryApplyInitialPlacement()
+        {
+            if (initialPlacementApplied || !HasStateAuthority)
+            {
+                return;
+            }
+
+            LevelCourseDefinition course = ResolveCurrentCourse();
+            if (course == null || course.PathCreator == null)
+            {
+                return;
+            }
+
+            ApplyCourseStartPlacement(course);
+            SyncNetworkStateFromMotor();
+            initialPlacementApplied = true;
+        }
+
+        private LevelCourseDefinition ResolveCurrentCourse()
+        {
+            if (NetworkRaceManager.Instance != null)
+            {
+                LevelCourseDefinition activeCourse = NetworkRaceManager.Instance.GetCurrentCourse();
+                if (activeCourse != null)
+                {
+                    return activeCourse;
+                }
+
+                return FindCourseByLevel(NetworkRaceManager.Instance.RoundState.LevelIndex);
+            }
+
+            return FindCourseByLevel(RaceRoundState.WaitingForPlayers.LevelIndex);
+        }
+
+        private static LevelCourseDefinition FindCourseByLevel(int levelIndex)
+        {
+            foreach (LevelCourseDefinition course in LegacySceneAdapter.BuildCourses())
+            {
+                if (course != null && course.LevelIndex == levelIndex)
+                {
+                    return course;
+                }
+            }
+
+            return null;
+        }
+
+        private void ApplyCourseStartPlacement(LevelCourseDefinition course)
+        {
+            if (course == null)
+            {
+                return;
+            }
+
+            motor.ResetForLevel(course);
+            initialPlacementApplied = true;
+        }
+
+        private static Quaternion SanitizeQuaternion(Quaternion rotation)
+        {
+            return SanitizeQuaternion(rotation, Quaternion.identity);
+        }
+
+        private static Quaternion SanitizeQuaternion(Quaternion rotation, Quaternion fallback)
+        {
+            float magnitude = Mathf.Sqrt((rotation.x * rotation.x) + (rotation.y * rotation.y) + (rotation.z * rotation.z) + (rotation.w * rotation.w));
+            if (magnitude < 0.0001f || float.IsNaN(magnitude) || float.IsInfinity(magnitude))
+            {
+                return fallback;
+            }
+
+            float inverseMagnitude = 1f / magnitude;
+            return new Quaternion(
+                rotation.x * inverseMagnitude,
+                rotation.y * inverseMagnitude,
+                rotation.z * inverseMagnitude,
+                rotation.w * inverseMagnitude);
         }
     }
 }

@@ -27,7 +27,7 @@ namespace RunnerGame.Online
 
             RaceRoundState state = NetworkRaceManager.Instance.RoundState;
             NetworkRunner runner = SessionRuntime.Runner;
-            float hudHeight = Debug.isDebugBuild ? 380f : 160f;
+            float hudHeight = Debug.isDebugBuild ? 410f : 160f;
             GUILayout.BeginArea(new Rect(20f, 20f, 340f, hudHeight), GUI.skin.box);
             GUILayout.Label("Online Race");
             GUILayout.Label($"Level: {state.LevelIndex}");
@@ -51,6 +51,7 @@ namespace RunnerGame.Online
                 GUILayout.Label($"Runner State: {runner.State}");
                 GUILayout.Label($"Session Name: {sessionName}");
                 GUILayout.Label($"Active Scene: {SceneManager.GetActiveScene().name}");
+                GUILayout.Label($"Fusion Scene Info: {GetFusionSceneInfo(runner)}");
                 GUILayout.Label($"Respawning: {RunnerNetworkPlayer.LocalPlayer.IsRespawning}");
                 GUILayout.Label($"Path State: {RunnerNetworkPlayer.LocalPlayer.ReplicatedPathState:F2}");
                 GUILayout.Label($"Local Y: {RunnerNetworkPlayer.LocalPlayer.LocalPositionY:F3}");
@@ -82,6 +83,13 @@ namespace RunnerGame.Online
             }
 
             GUILayout.EndArea();
+        }
+
+        private static string GetFusionSceneInfo(NetworkRunner runner)
+        {
+            return runner != null && runner.TryGetSceneInfo(out NetworkSceneInfo sceneInfo)
+                ? sceneInfo.ToString()
+                : "invalid";
         }
     }
 }

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using Fusion;
 using Fusion.Sockets;
@@ -10,6 +12,129 @@ using UnityEngine.SceneManagement;
 
 namespace RunnerGame.Online
 {
+    public static class OnlineBuildSceneResolver
+    {
+        public static bool TryResolveSceneRef(string expectedSceneName, string expectedScenePath, out SceneRef sceneRef, out int buildIndex)
+        {
+            if (TryResolveBuildIndex(expectedSceneName, expectedScenePath, out buildIndex))
+            {
+                sceneRef = SceneRef.FromIndex(buildIndex);
+                return true;
+            }
+
+            sceneRef = default;
+            return false;
+        }
+
+        public static bool TryResolveBuildIndex(string expectedSceneName, string expectedScenePath, out int buildIndex)
+        {
+            int exactPathIndex = SceneUtility.GetBuildIndexByScenePath(expectedScenePath);
+            if (IsBuildIndexValid(exactPathIndex, expectedSceneName, expectedScenePath))
+            {
+                buildIndex = exactPathIndex;
+                return true;
+            }
+
+            for (int index = 0; index < SceneManager.sceneCountInBuildSettings; index++)
+            {
+                if (TryGetBuildScenePath(index, out string scenePath) && PathsMatch(scenePath, expectedScenePath))
+                {
+                    buildIndex = index;
+                    return true;
+                }
+            }
+
+            for (int index = 0; index < SceneManager.sceneCountInBuildSettings; index++)
+            {
+                if (TryGetBuildScenePath(index, out string scenePath) && NamesMatch(scenePath, expectedSceneName, expectedScenePath))
+                {
+                    buildIndex = index;
+                    return true;
+                }
+            }
+
+            buildIndex = -1;
+            return false;
+        }
+
+        public static bool IsBuildIndexValid(int buildIndex, string expectedSceneName, string expectedScenePath)
+        {
+            return TryGetBuildScenePath(buildIndex, out string scenePath)
+                && (PathsMatch(scenePath, expectedScenePath) || NamesMatch(scenePath, expectedSceneName, expectedScenePath));
+        }
+
+        public static string DescribeResolvedBuildIndex(string expectedSceneName, string expectedScenePath)
+        {
+            return TryResolveBuildIndex(expectedSceneName, expectedScenePath, out int buildIndex)
+                ? buildIndex.ToString()
+                : "missing";
+        }
+
+        public static string DescribeBuildScenes()
+        {
+            if (SceneManager.sceneCountInBuildSettings <= 0)
+            {
+                return "none";
+            }
+
+            StringBuilder builder = new StringBuilder();
+            for (int index = 0; index < SceneManager.sceneCountInBuildSettings; index++)
+            {
+                if (index > 0)
+                {
+                    builder.Append(" | ");
+                }
+
+                string scenePath = SceneUtility.GetScenePathByBuildIndex(index);
+                builder.Append(index);
+                builder.Append(':');
+                builder.Append(string.IsNullOrWhiteSpace(scenePath) ? "<empty>" : scenePath);
+            }
+
+            return builder.ToString();
+        }
+
+        public static string GetBuildStamp()
+        {
+            string buildGuid = string.IsNullOrWhiteSpace(Application.buildGUID) ? "unknown" : Application.buildGUID;
+            return $"{Application.version} | {buildGuid}";
+        }
+
+        private static bool TryGetBuildScenePath(int buildIndex, out string scenePath)
+        {
+            if (buildIndex < 0 || buildIndex >= SceneManager.sceneCountInBuildSettings)
+            {
+                scenePath = string.Empty;
+                return false;
+            }
+
+            scenePath = SceneUtility.GetScenePathByBuildIndex(buildIndex);
+            return !string.IsNullOrWhiteSpace(scenePath);
+        }
+
+        private static bool PathsMatch(string actualPath, string expectedPath)
+        {
+            return string.Equals(NormalizePath(actualPath), NormalizePath(expectedPath), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool NamesMatch(string actualPath, string expectedSceneName, string expectedScenePath)
+        {
+            string actualName = Path.GetFileNameWithoutExtension(actualPath);
+            string expectedName = string.IsNullOrWhiteSpace(expectedSceneName)
+                ? Path.GetFileNameWithoutExtension(expectedScenePath)
+                : expectedSceneName;
+
+            return string.Equals(actualName, expectedName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizePath(string path)
+        {
+            return string.IsNullOrWhiteSpace(path)
+                ? string.Empty
+                : path.Replace('\\', '/').Trim();
+        }
+    }
+
     public class SessionBootstrapper : MonoBehaviour, INetworkRunnerCallbacks
     {
         private const int MaxPlayers = 2;
@@ -47,6 +172,13 @@ namespace RunnerGame.Online
         private string lastTransportFailureMessage = string.Empty;
         private float gameplayLoadRequestedAtRealtime = -1f;
         private string pendingSceneLoadName = string.Empty;
+        private int bootstrapSceneBuildIndex = -1;
+        private SceneRef bootstrapSceneRef;
+        private int gameplaySceneBuildIndex = -1;
+        private SceneRef gameplaySceneRef;
+        private bool raceManagerSpawnPending;
+        private bool localPlayerSpawnPending;
+        private PlayerRef pendingLocalPlayerSpawnRef = PlayerRef.None;
         private Material bootstrapSkyboxMaterial;
         private AmbientMode bootstrapAmbientMode;
         private Color bootstrapAmbientSkyColor;
@@ -217,6 +349,7 @@ namespace RunnerGame.Online
         {
             sceneLoadRequested = false;
             activePlayers.Clear();
+            ResetGameplaySpawnState();
             CaptureBootstrapRenderSettings();
             ResetFailureDetails();
             ClearGameplayLoadWatchdog();
@@ -237,7 +370,6 @@ namespace RunnerGame.Online
 
                     var startScene = new NetworkSceneInfo();
                     startScene.AddSceneRef(bootstrapSceneRef, LoadSceneMode.Single);
-
                     StartGameResult startResult = await runner.StartGame(new StartGameArgs
                     {
                         GameMode = GameMode.Shared,
@@ -323,6 +455,7 @@ namespace RunnerGame.Online
                 leavingSession = false;
                 handlingShutdown = false;
                 sceneLoadRequested = false;
+                ResetGameplaySpawnState();
                 ClearGameplayLoadWatchdog();
                 activePlayers.Clear();
             }
@@ -350,6 +483,7 @@ namespace RunnerGame.Online
             SessionRuntime.Clear();
             ClearGameplayLoadWatchdog();
             sceneLoadRequested = false;
+            ResetGameplaySpawnState();
 
             if (loadBootstrapScene && SceneManager.GetActiveScene().name != BootstrapSceneName)
             {
@@ -363,6 +497,7 @@ namespace RunnerGame.Online
             statusMessage = message;
             sceneLoadRequested = false;
             ClearGameplayLoadWatchdog();
+            ResetGameplaySpawnState();
             LogSessionSnapshot($"Error: {message}", runner);
         }
 
@@ -386,6 +521,13 @@ namespace RunnerGame.Online
             return new string(buffer);
         }
 
+        private void ResetGameplaySpawnState()
+        {
+            raceManagerSpawnPending = false;
+            localPlayerSpawnPending = false;
+            pendingLocalPlayerSpawnRef = PlayerRef.None;
+        }
+
         private void CaptureBootstrapRenderSettings()
         {
             bootstrapSkyboxMaterial = RenderSettings.skybox;
@@ -403,47 +545,73 @@ namespace RunnerGame.Online
             bootstrapSubtractiveShadowColor = RenderSettings.subtractiveShadowColor;
         }
 
-        private static bool TryResolveSceneRef(string scenePath, out SceneRef sceneRef)
-        {
-            int buildIndex = SceneUtility.GetBuildIndexByScenePath(scenePath);
-            if (buildIndex < 0)
-            {
-                sceneRef = default;
-                return false;
-            }
-
-            sceneRef = SceneRef.FromIndex(buildIndex);
-            return true;
-        }
-
         private bool TryGetBootstrapSceneRef(out SceneRef sceneRef, bool reportError = true)
         {
-            if (TryResolveSceneRef(BootstrapScenePath, out sceneRef))
-            {
-                return true;
-            }
-
-            if (reportError)
-            {
-                SetError($"Bootstrap scene is missing from build settings: {BootstrapScenePath}");
-            }
-
-            return false;
+            return TryGetSceneRef(
+                ref bootstrapSceneBuildIndex,
+                ref bootstrapSceneRef,
+                BootstrapSceneName,
+                BootstrapScenePath,
+                "Bootstrap",
+                out sceneRef,
+                reportError);
         }
 
         private bool TryGetGameplaySceneRef(out SceneRef sceneRef, bool reportError = true)
         {
-            if (TryResolveSceneRef(GameplayScenePath, out sceneRef))
+            return TryGetSceneRef(
+                ref gameplaySceneBuildIndex,
+                ref gameplaySceneRef,
+                GameplaySceneName,
+                GameplayScenePath,
+                "Gameplay",
+                out sceneRef,
+                reportError);
+        }
+
+        private bool TryGetSceneRef(
+            ref int cachedBuildIndex,
+            ref SceneRef cachedSceneRef,
+            string sceneName,
+            string scenePath,
+            string sceneLabel,
+            out SceneRef sceneRef,
+            bool reportError)
+        {
+            if (cachedSceneRef != default && OnlineBuildSceneResolver.IsBuildIndexValid(cachedBuildIndex, sceneName, scenePath))
             {
+                sceneRef = cachedSceneRef;
+                return true;
+            }
+
+            cachedBuildIndex = -1;
+            cachedSceneRef = default;
+
+            if (OnlineBuildSceneResolver.TryResolveSceneRef(sceneName, scenePath, out sceneRef, out int buildIndex))
+            {
+                cachedBuildIndex = buildIndex;
+                cachedSceneRef = sceneRef;
                 return true;
             }
 
             if (reportError)
             {
-                SetError($"Gameplay scene is missing from build settings: {GameplayScenePath}");
+                LogSceneResolutionFailure(sceneLabel, sceneName, scenePath);
+                SetError($"{sceneLabel} scene is missing from build settings: {scenePath}");
             }
 
             return false;
+        }
+
+        private void LogSceneResolutionFailure(string sceneLabel, string sceneName, string scenePath)
+        {
+            string bootstrapBuildIndex = OnlineBuildSceneResolver.DescribeResolvedBuildIndex(BootstrapSceneName, BootstrapScenePath);
+            string gameplayBuildIndex = OnlineBuildSceneResolver.DescribeResolvedBuildIndex(GameplaySceneName, GameplayScenePath);
+            string buildStamp = OnlineBuildSceneResolver.GetBuildStamp();
+            string buildScenes = OnlineBuildSceneResolver.DescribeBuildScenes();
+
+            Debug.LogError(
+                $"[SessionBootstrapper] Failed to resolve {sceneLabel} scene name={sceneName} path={scenePath} buildStamp={buildStamp} bootstrapIndex={bootstrapBuildIndex} gameplayIndex={gameplayBuildIndex} buildScenes=[{buildScenes}]");
         }
 
         private static bool TryGetLoadedScene(string sceneName, out Scene scene)
@@ -458,14 +626,57 @@ namespace RunnerGame.Online
             return scene.IsValid() && scene.isLoaded && scene.name == sceneName;
         }
 
+        private static bool IsSceneLoadedByUnity(string sceneName)
+        {
+            return TryGetLoadedScene(sceneName, out _);
+        }
+
+        private static bool TryGetRunnerSceneInfo(NetworkRunner networkRunner, out NetworkSceneInfo sceneInfo)
+        {
+            sceneInfo = default;
+            return HasRunningRunner(networkRunner) && networkRunner.TryGetSceneInfo(out sceneInfo);
+        }
+
+        private static bool SceneInfoContains(NetworkSceneInfo sceneInfo, SceneRef sceneRef)
+        {
+            if (sceneRef == default)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < sceneInfo.SceneCount; index++)
+            {
+                if (sceneInfo.Scenes[index] == sceneRef)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsBootstrapSceneLoadedByFusion(NetworkRunner networkRunner)
+        {
+            return TryGetBootstrapSceneRef(out SceneRef sceneRef, reportError: false)
+                && TryGetRunnerSceneInfo(networkRunner, out NetworkSceneInfo sceneInfo)
+                && SceneInfoContains(sceneInfo, sceneRef);
+        }
+
+        private bool IsGameplaySceneLoadedByFusion(NetworkRunner networkRunner)
+        {
+            return TryGetGameplaySceneRef(out SceneRef sceneRef, reportError: false)
+                && TryGetRunnerSceneInfo(networkRunner, out NetworkSceneInfo sceneInfo)
+                && SceneInfoContains(sceneInfo, sceneRef);
+        }
+
         private bool IsBootstrapSceneLoaded(NetworkRunner networkRunner)
         {
-            return TryGetLoadedScene(BootstrapSceneName, out _);
+            return IsBootstrapSceneLoadedByFusion(networkRunner);
         }
 
         private bool IsGameplaySceneLoaded(NetworkRunner networkRunner)
         {
-            return TryGetLoadedScene(GameplaySceneName, out _);
+            return IsGameplaySceneLoadedByFusion(networkRunner);
         }
 
         private static bool HasRunningRunner(NetworkRunner networkRunner)
@@ -542,6 +753,13 @@ namespace RunnerGame.Online
             return null;
         }
 
+        private static string DescribeFusionSceneInfo(NetworkRunner networkRunner)
+        {
+            return TryGetRunnerSceneInfo(networkRunner, out NetworkSceneInfo sceneInfo)
+                ? sceneInfo.ToString()
+                : "invalid";
+        }
+
         private void RestoreBootstrapRenderSettings(NetworkRunner networkRunner)
         {
             if (!IsBootstrapSceneLoaded(networkRunner) || IsGameplaySceneLoaded(networkRunner))
@@ -573,19 +791,44 @@ namespace RunnerGame.Online
             DynamicGI.UpdateEnvironment();
         }
 
-        private bool IsGameplayPresentationActive()
+        private bool HasPendingGameplaySpawns()
         {
-            if (!IsGameplaySceneLoaded(runner))
+            return raceManagerSpawnPending || localPlayerSpawnPending;
+        }
+
+        private bool IsGameplayPresentationActive(NetworkRunner networkRunner)
+        {
+            if (!IsGameplaySceneLoaded(networkRunner))
             {
                 return false;
             }
 
-            return NetworkRaceManager.Instance != null || RunnerNetworkPlayer.LocalPlayer != null;
+            if (!OnlineSceneRuntime.IsGameplaySceneInitialized(networkRunner))
+            {
+                return false;
+            }
+
+            RunnerNetworkPlayer localPlayer = RunnerNetworkPlayer.LocalPlayer;
+            if (NetworkRaceManager.Instance == null || localPlayer == null)
+            {
+                return false;
+            }
+
+            if (!HasRunningRunner(networkRunner) || !networkRunner.IsPlayerValid(networkRunner.LocalPlayer))
+            {
+                return false;
+            }
+
+            return localPlayer.Runner == networkRunner
+                && localPlayer.IsLocalControlled
+                && localPlayer.Object != null
+                && localPlayer.Object.IsValid
+                && localPlayer.HasActiveCameraBinding;
         }
 
         private bool ShouldShowBootstrapGui()
         {
-            return !IsGameplayPresentationActive();
+            return !IsGameplayPresentationActive(runner);
         }
 
         private void SyncActivePlayersFromRunner(NetworkRunner networkRunner)
@@ -607,7 +850,7 @@ namespace RunnerGame.Online
         {
             if (IsGameplaySceneLoaded(networkRunner))
             {
-                if (IsGameplayPresentationActive())
+                if (IsGameplayPresentationActive(networkRunner))
                 {
                     sceneLoadRequested = false;
                     ClearGameplayLoadWatchdog();
@@ -617,9 +860,11 @@ namespace RunnerGame.Online
                 else
                 {
                     state = BootstrapState.WaitingForSceneLoad;
-                    statusMessage = DrivesSceneLoad(networkRunner)
-                        ? "Gameplay scene loaded. Finalizing race start..."
-                        : "Gameplay scene loaded. Waiting for race to initialize...";
+                    statusMessage = HasPendingGameplaySpawns()
+                        ? "Gameplay scene loaded. Spawning network objects..."
+                        : DrivesSceneLoad(networkRunner)
+                            ? "Gameplay scene loaded. Finalizing race start..."
+                            : "Gameplay scene loaded. Waiting for race to initialize...";
                 }
 
                 return;
@@ -677,7 +922,7 @@ namespace RunnerGame.Online
                 return;
             }
 
-            if (IsGameplayPresentationActive())
+            if (IsGameplayPresentationActive(networkRunner))
             {
                 sceneLoadRequested = false;
                 ClearGameplayLoadWatchdog();
@@ -688,9 +933,11 @@ namespace RunnerGame.Online
             }
 
             state = BootstrapState.WaitingForSceneLoad;
-            statusMessage = HasFullRoom(networkRunner)
-                ? "Gameplay scene loaded. Finalizing race start..."
-                : "Gameplay scene loaded. Waiting for race to initialize...";
+            statusMessage = HasPendingGameplaySpawns()
+                ? "Gameplay scene loaded. Spawning network objects..."
+                : HasFullRoom(networkRunner)
+                    ? "Gameplay scene loaded. Finalizing race start..."
+                    : "Gameplay scene loaded. Waiting for race to initialize...";
         }
 
         private void LogSessionSnapshot(string context, NetworkRunner networkRunner)
@@ -709,18 +956,26 @@ namespace RunnerGame.Online
             string playersLabel = playerLabels.Count > 0 ? string.Join(", ", playerLabels) : "none";
             string localPlayerLabel = networkRunner != null ? networkRunner.LocalPlayer.ToString() : "n/a";
             string sessionLabel = string.IsNullOrWhiteSpace(SessionRuntime.SessionCode) ? "none" : SessionRuntime.SessionCode;
-            string sceneName = SceneManager.GetActiveScene().name;
+            string unitySceneName = SceneManager.GetActiveScene().name;
             bool isSceneAuthority = networkRunner != null && networkRunner.IsRunning && networkRunner.IsSceneAuthority;
             bool isMasterClient = networkRunner != null && networkRunner.IsRunning && networkRunner.IsSharedModeMasterClient;
             bool hostDrivesSceneLoad = DrivesSceneLoad(networkRunner);
             bool bootstrapLoaded = IsBootstrapSceneLoaded(networkRunner);
             bool gameplayLoaded = IsGameplaySceneLoaded(networkRunner);
+            bool bootstrapLoadedByFusion = IsBootstrapSceneLoadedByFusion(networkRunner);
+            bool gameplayLoadedByFusion = IsGameplaySceneLoadedByFusion(networkRunner);
+            bool bootstrapLoadedByUnity = IsSceneLoadedByUnity(BootstrapSceneName);
+            bool gameplayLoadedByUnity = IsSceneLoadedByUnity(GameplaySceneName);
+            string bootstrapBuildIndex = OnlineBuildSceneResolver.DescribeResolvedBuildIndex(BootstrapSceneName, BootstrapScenePath);
+            string gameplayBuildIndex = OnlineBuildSceneResolver.DescribeResolvedBuildIndex(GameplaySceneName, GameplayScenePath);
+            string buildStamp = OnlineBuildSceneResolver.GetBuildStamp();
             bool fullRoom = networkRunner != null && networkRunner.IsRunning && activePlayers.Count == MaxPlayers;
             bool localPlayerValid = networkRunner != null && networkRunner.IsRunning && networkRunner.IsPlayerValid(networkRunner.LocalPlayer);
             bool hasActiveRunnerSession = SessionRuntime.Runner != null && SessionRuntime.Runner.IsRunning;
+            string fusionSceneInfo = DescribeFusionSceneInfo(networkRunner);
 
             Debug.Log(
-                $"[SessionBootstrapper] {context} session={sessionLabel} local={localPlayerLabel} players=[{playersLabel}] scene={sceneName} bootstrapLoaded={bootstrapLoaded} gameplayLoaded={gameplayLoaded} sceneAuthority={isSceneAuthority} masterClient={isMasterClient} hostDriver={hostDrivesSceneLoad} fullRoom={fullRoom} localPlayerValid={localPlayerValid} state={state} sceneLoadRequested={sceneLoadRequested} gameplayLoadPending={IsGameplayLoadPending()} activeRunnerSession={hasActiveRunnerSession}");
+                $"[SessionBootstrapper] {context} session={sessionLabel} local={localPlayerLabel} players=[{playersLabel}] unityScene={unitySceneName} fusionSceneInfo={fusionSceneInfo} buildStamp={buildStamp} bootstrapIndex={bootstrapBuildIndex} gameplayIndex={gameplayBuildIndex} bootstrapLoaded={bootstrapLoaded} gameplayLoaded={gameplayLoaded} bootstrapFusion={bootstrapLoadedByFusion} gameplayFusion={gameplayLoadedByFusion} bootstrapUnity={bootstrapLoadedByUnity} gameplayUnity={gameplayLoadedByUnity} sceneAuthority={isSceneAuthority} masterClient={isMasterClient} hostDriver={hostDrivesSceneLoad} fullRoom={fullRoom} localPlayerValid={localPlayerValid} state={state} sceneLoadRequested={sceneLoadRequested} gameplayLoadPending={IsGameplayLoadPending()} pendingSpawns={HasPendingGameplaySpawns()} activeRunnerSession={hasActiveRunnerSession}");
 #endif
         }
 
@@ -733,7 +988,7 @@ namespace RunnerGame.Online
 
             RestoreBootstrapRenderSettings(runner);
 
-            if (HasGameplayLoadTimedOut() && !IsGameplayPresentationActive())
+            if (HasGameplayLoadTimedOut() && !IsGameplayPresentationActive(runner))
             {
                 LogSessionSnapshot("Update: gameplay load watchdog timed out", runner);
                 SetError($"Timed out waiting for '{pendingSceneLoadName}' to become ready.");
@@ -742,7 +997,7 @@ namespace RunnerGame.Online
 
             if (IsGameplaySceneLoaded(runner))
             {
-                if (!IsGameplayPresentationActive())
+                if (!IsGameplayPresentationActive(runner))
                 {
                     EnsureGameplayPresentationReady(runner, "Update");
                 }
@@ -823,9 +1078,18 @@ namespace RunnerGame.Online
                     throw new InvalidOperationException($"Missing Resources/{RaceManagerPrefabResourcePath}.prefab required for Fusion gameplay startup.");
                 }
 
-                if (NetworkRaceManager.Instance == null)
+                if (NetworkRaceManager.Instance != null)
                 {
-                    networkRunner.Spawn(raceManagerPrefab, flags: NetworkSpawnFlags.SharedModeStateAuthMasterClient);
+                    raceManagerSpawnPending = false;
+                }
+                else if (!raceManagerSpawnPending)
+                {
+                    raceManagerSpawnPending = true;
+                    LogSessionSnapshot("EnsureGameplaySessionObjects: spawning race manager async", networkRunner);
+                    networkRunner.SpawnAsync(
+                        raceManagerPrefab,
+                        flags: NetworkSpawnFlags.SharedModeStateAuthMasterClient,
+                        onCompleted: result => HandleRaceManagerSpawnCompleted(networkRunner, result));
                 }
             }
 
@@ -842,17 +1106,77 @@ namespace RunnerGame.Online
 
             if (networkRunner.TryGetPlayerObject(networkRunner.LocalPlayer, out NetworkObject existingObject) && existingObject != null)
             {
+                localPlayerSpawnPending = false;
+                pendingLocalPlayerSpawnRef = PlayerRef.None;
                 return;
             }
 
-            NetworkObject playerObject = networkRunner.Spawn(
+            if (pendingLocalPlayerSpawnRef != PlayerRef.None && pendingLocalPlayerSpawnRef != networkRunner.LocalPlayer)
+            {
+                localPlayerSpawnPending = false;
+                pendingLocalPlayerSpawnRef = PlayerRef.None;
+            }
+
+            if (localPlayerSpawnPending)
+            {
+                return;
+            }
+
+            pendingLocalPlayerSpawnRef = networkRunner.LocalPlayer;
+            localPlayerSpawnPending = true;
+            LogSessionSnapshot("EnsureGameplaySessionObjects: spawning local player async", networkRunner);
+            networkRunner.SpawnAsync(
                 playerPrefab,
                 position: Vector3.zero,
                 rotation: Quaternion.identity,
                 inputAuthority: networkRunner.LocalPlayer,
-                flags: NetworkSpawnFlags.SharedModeStateAuthLocalPlayer);
+                flags: NetworkSpawnFlags.SharedModeStateAuthLocalPlayer,
+                onCompleted: result => HandleLocalPlayerSpawnCompleted(networkRunner, networkRunner.LocalPlayer, result));
+        }
 
-            networkRunner.SetPlayerObject(networkRunner.LocalPlayer, playerObject);
+        private void HandleRaceManagerSpawnCompleted(NetworkRunner sourceRunner, NetworkSpawnOp result)
+        {
+            raceManagerSpawnPending = false;
+
+            if (!HasRunningRunner(sourceRunner) || runner != sourceRunner || leavingSession)
+            {
+                return;
+            }
+
+            LogSessionSnapshot($"HandleRaceManagerSpawnCompleted status={result.Status}", sourceRunner);
+
+            if (!result.IsSpawned || result.Object == null)
+            {
+                SetError($"Failed to spawn NetworkRaceManager: {result.Status}");
+                return;
+            }
+
+            EnsureGameplayPresentationReady(sourceRunner, "HandleRaceManagerSpawnCompleted");
+        }
+
+        private void HandleLocalPlayerSpawnCompleted(NetworkRunner sourceRunner, PlayerRef playerRef, NetworkSpawnOp result)
+        {
+            if (pendingLocalPlayerSpawnRef == playerRef)
+            {
+                pendingLocalPlayerSpawnRef = PlayerRef.None;
+            }
+
+            localPlayerSpawnPending = false;
+
+            if (!HasRunningRunner(sourceRunner) || runner != sourceRunner || leavingSession)
+            {
+                return;
+            }
+
+            LogSessionSnapshot($"HandleLocalPlayerSpawnCompleted status={result.Status} player={playerRef}", sourceRunner);
+
+            if (!result.IsSpawned || result.Object == null)
+            {
+                SetError($"Failed to spawn RunnerNetworkPlayer: {result.Status}");
+                return;
+            }
+
+            EnsureGameplayPresentationReady(sourceRunner, "HandleLocalPlayerSpawnCompleted");
         }
 
         private void OnGUI()
@@ -862,7 +1186,7 @@ namespace RunnerGame.Online
                 return;
             }
 
-            float areaHeight = Debug.isDebugBuild ? 560f : 360f;
+            float areaHeight = Debug.isDebugBuild ? 720f : 360f;
             Rect area = new Rect((Screen.width * 0.5f) - 220f, (Screen.height * 0.5f) - (areaHeight * 0.5f), 440f, areaHeight);
             GUILayout.BeginArea(area, GUI.skin.window);
             GUILayout.Label("Runner Game Online");
@@ -898,9 +1222,15 @@ namespace RunnerGame.Online
             {
                 GUILayout.Space(12f);
                 GUILayout.Label("Bootstrap Debug");
-                GUILayout.Label($"Active Scene: {SceneManager.GetActiveScene().name}");
-                GUILayout.Label($"Bootstrap Loaded: {IsBootstrapSceneLoaded(runner)}");
-                GUILayout.Label($"Gameplay Loaded: {IsGameplaySceneLoaded(runner)}");
+                GUILayout.Label($"Build Stamp: {OnlineBuildSceneResolver.GetBuildStamp()}");
+                GUILayout.Label($"Active Unity Scene: {SceneManager.GetActiveScene().name}");
+                GUILayout.Label($"Fusion Scene Info: {DescribeFusionSceneInfo(runner)}");
+                GUILayout.Label($"Bootstrap Build Index: {OnlineBuildSceneResolver.DescribeResolvedBuildIndex(BootstrapSceneName, BootstrapScenePath)}");
+                GUILayout.Label($"Gameplay Build Index: {OnlineBuildSceneResolver.DescribeResolvedBuildIndex(GameplaySceneName, GameplayScenePath)}");
+                GUILayout.Label($"Bootstrap Loaded (Fusion): {IsBootstrapSceneLoadedByFusion(runner)}");
+                GUILayout.Label($"Bootstrap Loaded (Unity): {IsSceneLoadedByUnity(BootstrapSceneName)}");
+                GUILayout.Label($"Gameplay Loaded (Fusion): {IsGameplaySceneLoadedByFusion(runner)}");
+                GUILayout.Label($"Gameplay Loaded (Unity): {IsSceneLoadedByUnity(GameplaySceneName)}");
                 GUILayout.Label($"Host Drives Scene Load: {DrivesSceneLoad(runner)}");
                 GUILayout.Label($"Scene Authority: {HasRunningRunner(runner) && runner.IsSceneAuthority}");
                 GUILayout.Label($"Master Client: {HasRunningRunner(runner) && runner.IsSharedModeMasterClient}");
@@ -908,6 +1238,7 @@ namespace RunnerGame.Online
                 GUILayout.Label($"Local Player Valid: {IsLocalPlayerReady(runner)}");
                 GUILayout.Label($"Scene Load Requested: {sceneLoadRequested}");
                 GUILayout.Label($"Gameplay Load Pending: {IsGameplayLoadPending()}");
+                GUILayout.Label($"Pending Gameplay Spawns: {HasPendingGameplaySpawns()}");
             }
 
             GUILayout.EndArea();
