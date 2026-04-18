@@ -19,12 +19,16 @@ namespace RunnerGame.Online
         private const string MainRedCameraName = "MainRedCamera";
         private const string BlueVirtualCameraName = "BlueCamera";
         private const string RedVirtualCameraName = "RedCamera";
+        private const string RedVisualCloneName = "RedVisual";
+        private const string BlueVisualCloneName = "BlueVisual";
 
         private static GameObject redPrototype;
         private static GameObject bluePrototype;
         private static ObstacleManager obstacleManager;
         private static GameObject bootstrapDirectionalLightTemplate;
         private static GameObject onlineDirectionalLightInstance;
+        private static readonly HashSet<GameObject> warnedRuntimePrototypeCandidates = new HashSet<GameObject>();
+        private static readonly HashSet<RunnerSpawnSlot> warnedPrototypeReplacementSlots = new HashSet<RunnerSpawnSlot>();
 
         public static ObstacleManager ObstacleManager => obstacleManager;
 
@@ -48,35 +52,26 @@ namespace RunnerGame.Online
         {
             EnsureGameplayLighting();
             RefreshSceneLightingEnvironment();
-            SuppressLegacyLocalRuntime(SceneManager.GetSceneByName(GameplaySceneName));
+            Scene gameplayScene = SceneManager.GetSceneByName(GameplaySceneName);
+            SuppressLegacyLocalRuntime(gameplayScene);
+            CaptureGameplayVisualPrototypes(gameplayScene);
 
-            RedPlayerMovement redPlayer = Object.FindAnyObjectByType<RedPlayerMovement>(FindObjectsInactive.Include);
-            BluePlayerMovement bluePlayer = Object.FindAnyObjectByType<BluePlayerMovement>(FindObjectsInactive.Include);
-            obstacleManager = Object.FindAnyObjectByType<ObstacleManager>(FindObjectsInactive.Include);
+            obstacleManager = FindComponentInScene<ObstacleManager>(gameplayScene);
+            if (obstacleManager == null)
+            {
+                obstacleManager = Object.FindAnyObjectByType<ObstacleManager>(FindObjectsInactive.Include);
+            }
 
-            GlobalVolumeManager volumeManager = Object.FindAnyObjectByType<GlobalVolumeManager>(FindObjectsInactive.Include);
+            GlobalVolumeManager volumeManager = FindComponentInScene<GlobalVolumeManager>(gameplayScene)
+                ?? Object.FindAnyObjectByType<GlobalVolumeManager>(FindObjectsInactive.Include);
             if (volumeManager != null)
             {
                 volumeManager.Color();
                 volumeManager.clearBlur();
             }
 
-            if (redPlayer != null)
-            {
-                redPrototype = redPlayer.gameObject;
-                redPlayer.enabled = false;
-                redPrototype.SetActive(false);
-            }
-
-            if (bluePlayer != null)
-            {
-                bluePrototype = bluePlayer.gameObject;
-                bluePlayer.enabled = false;
-                bluePrototype.SetActive(false);
-            }
-
-            DisableLegacyCameraRig(SceneManager.GetSceneByName(GameplaySceneName), MainBlueCameraName, BlueVirtualCameraName);
-            DisableLegacyCameraRig(SceneManager.GetSceneByName(GameplaySceneName), MainRedCameraName, RedVirtualCameraName);
+            DisableLegacyCameraRig(gameplayScene, MainBlueCameraName, BlueVirtualCameraName);
+            DisableLegacyCameraRig(gameplayScene, MainRedCameraName, RedVirtualCameraName);
         }
 
         public static IReadOnlyList<LevelCourseDefinition> BuildCourses()
@@ -114,20 +109,22 @@ namespace RunnerGame.Online
             }
 
             GameObject clone = Object.Instantiate(source, parent, false);
-            clone.name = $"{slot}Visual";
+            clone.name = slot == RunnerSpawnSlot.Blue ? BlueVisualCloneName : RedVisualCloneName;
             clone.transform.localPosition = Vector3.zero;
             clone.transform.localRotation = Quaternion.identity;
             clone.transform.localScale = Vector3.one;
-            clone.SetActive(true);
+            clone.SetActive(false);
             SanitizeVisualClone(clone, slot);
+            clone.SetActive(true);
             return clone;
         }
 
         private static PathCreator[] GetLegacyPathCreators()
         {
             List<PathCreator> creators = new List<PathCreator>();
-            RedPlayerMovement redPlayer = Object.FindAnyObjectByType<RedPlayerMovement>(FindObjectsInactive.Include);
-            BluePlayerMovement bluePlayer = Object.FindAnyObjectByType<BluePlayerMovement>(FindObjectsInactive.Include);
+            Scene gameplayScene = SceneManager.GetSceneByName(GameplaySceneName);
+            RedPlayerMovement redPlayer = GetStablePrototypeComponent<RedPlayerMovement>(gameplayScene, redPrototype, RunnerSpawnSlot.Red);
+            BluePlayerMovement bluePlayer = GetStablePrototypeComponent<BluePlayerMovement>(gameplayScene, bluePrototype, RunnerSpawnSlot.Blue);
 
             if (redPlayer != null)
             {
@@ -232,14 +229,14 @@ namespace RunnerGame.Online
                 legacyCanvas.gameObject.SetActive(false);
             }
 
-            RedPlayerMovement redPlayer = FindComponentInScene<RedPlayerMovement>(scene);
+            RedPlayerMovement redPlayer = GetStablePrototypeComponent<RedPlayerMovement>(scene, redPrototype, RunnerSpawnSlot.Red);
             if (redPlayer != null)
             {
                 redPlayer.enabled = false;
                 redPlayer.gameObject.SetActive(false);
             }
 
-            BluePlayerMovement bluePlayer = FindComponentInScene<BluePlayerMovement>(scene);
+            BluePlayerMovement bluePlayer = GetStablePrototypeComponent<BluePlayerMovement>(scene, bluePrototype, RunnerSpawnSlot.Blue);
             if (bluePlayer != null)
             {
                 bluePlayer.enabled = false;
@@ -334,6 +331,141 @@ namespace RunnerGame.Online
             }
 
             return null;
+        }
+
+        private static void CaptureGameplayVisualPrototypes(Scene scene)
+        {
+            redPrototype = CaptureLegacyPrototype(scene, redPrototype, RunnerSpawnSlot.Red);
+            bluePrototype = CaptureLegacyPrototype(scene, bluePrototype, RunnerSpawnSlot.Blue);
+
+            EnsureLegacyPrototypeDisabled(redPrototype);
+            EnsureLegacyPrototypeDisabled(bluePrototype);
+        }
+
+        private static GameObject CaptureLegacyPrototype(Scene scene, GameObject currentPrototype, RunnerSpawnSlot slot)
+        {
+            GameObject candidate = FindLegacyPrototypeObjectInScene(scene, slot);
+            if (candidate == null)
+            {
+                return currentPrototype;
+            }
+
+            if (IsStablePrototypeReference(currentPrototype, scene))
+            {
+                if (currentPrototype != candidate && warnedPrototypeReplacementSlots.Add(slot))
+                {
+                    Debug.LogWarning($"LegacySceneAdapter ignored a {slot} prototype replacement candidate '{candidate.name}' because a stable scene prototype is already captured.");
+                }
+
+                return currentPrototype;
+            }
+
+            return candidate;
+        }
+
+        private static GameObject FindLegacyPrototypeObjectInScene(Scene scene, RunnerSpawnSlot slot)
+        {
+            return slot switch
+            {
+                RunnerSpawnSlot.Red => FindLegacyPrototypeComponentInScene<RedPlayerMovement>(scene)?.gameObject,
+                RunnerSpawnSlot.Blue => FindLegacyPrototypeComponentInScene<BluePlayerMovement>(scene)?.gameObject,
+                _ => null
+            };
+        }
+
+        private static T GetStablePrototypeComponent<T>(Scene scene, GameObject prototype, RunnerSpawnSlot slot) where T : Behaviour
+        {
+            if (IsStablePrototypeReference(prototype, scene))
+            {
+                return prototype.GetComponent<T>();
+            }
+
+            return slot switch
+            {
+                RunnerSpawnSlot.Red when typeof(T) == typeof(RedPlayerMovement) => FindLegacyPrototypeComponentInScene<RedPlayerMovement>(scene) as T,
+                RunnerSpawnSlot.Blue when typeof(T) == typeof(BluePlayerMovement) => FindLegacyPrototypeComponentInScene<BluePlayerMovement>(scene) as T,
+                _ => null
+            };
+        }
+
+        private static T FindLegacyPrototypeComponentInScene<T>(Scene scene) where T : Behaviour
+        {
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                return null;
+            }
+
+            foreach (GameObject rootObject in scene.GetRootGameObjects())
+            {
+                if (rootObject == null)
+                {
+                    continue;
+                }
+
+                foreach (T component in rootObject.GetComponentsInChildren<T>(true))
+                {
+                    if (component != null && IsEligiblePrototypeCandidate(component.gameObject, scene))
+                    {
+                        return component;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsEligiblePrototypeCandidate(GameObject candidate, Scene scene)
+        {
+            if (candidate == null || !scene.IsValid() || candidate.scene != scene)
+            {
+                return false;
+            }
+
+            if (candidate.GetComponentInParent<RunnerNetworkPlayer>(true) != null)
+            {
+                if (warnedRuntimePrototypeCandidates.Add(candidate))
+                {
+                    Debug.LogWarning($"LegacySceneAdapter ignored runtime visual '{candidate.name}' while capturing gameplay prototypes because it is parented under RunnerNetworkPlayer.");
+                }
+
+                return false;
+            }
+
+            return !IsRuntimeVisualCloneName(candidate.name);
+        }
+
+        private static bool IsStablePrototypeReference(GameObject prototype, Scene scene)
+        {
+            return prototype != null
+                && scene.IsValid()
+                && prototype.scene == scene
+                && !IsRuntimeVisualCloneName(prototype.name)
+                && prototype.GetComponentInParent<RunnerNetworkPlayer>(true) == null;
+        }
+
+        private static bool IsRuntimeVisualCloneName(string objectName)
+        {
+            return objectName == RedVisualCloneName || objectName == BlueVisualCloneName;
+        }
+
+        private static void EnsureLegacyPrototypeDisabled(GameObject prototype)
+        {
+            if (prototype == null)
+            {
+                return;
+            }
+
+            foreach (RedPlayerMovement redMovement in prototype.GetComponentsInChildren<RedPlayerMovement>(true))
+            {
+                redMovement.enabled = false;
+            }
+
+            foreach (BluePlayerMovement blueMovement in prototype.GetComponentsInChildren<BluePlayerMovement>(true))
+            {
+                blueMovement.enabled = false;
+            }
+
+            prototype.SetActive(false);
         }
 
         private static T FindComponentInSceneByName<T>(Scene scene, string objectName) where T : Component
@@ -566,15 +698,15 @@ namespace RunnerGame.Online
                 Object.Destroy(light.gameObject);
             }
 
-            RedPlayerMovement redMovement = clone.GetComponent<RedPlayerMovement>();
-            if (redMovement != null)
+            foreach (RedPlayerMovement redMovement in clone.GetComponentsInChildren<RedPlayerMovement>(true))
             {
+                redMovement.enabled = false;
                 Object.Destroy(redMovement);
             }
 
-            BluePlayerMovement blueMovement = clone.GetComponent<BluePlayerMovement>();
-            if (blueMovement != null)
+            foreach (BluePlayerMovement blueMovement in clone.GetComponentsInChildren<BluePlayerMovement>(true))
             {
+                blueMovement.enabled = false;
                 Object.Destroy(blueMovement);
             }
         }
