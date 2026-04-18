@@ -73,6 +73,11 @@ public class RedPlayerMovement : MonoBehaviour
 
     void Start()
     {
+        if (RunnerGame.Online.OnlineSceneRuntime.DisableLegacyRuntimeComponentIfBlocked(this, deactivateGameObject: true))
+        {
+            return;
+        }
+
         animator = GetComponent<Animator>();
         myRigidbody = GetComponent<Rigidbody>();
         myTransform = transform;
@@ -394,7 +399,10 @@ public class RedPlayerMovement : MonoBehaviour
         {
             obstacleManager.SetActiveLevel(nivell);
         }
-        canvasManager.activaCanviaLevelText(currentNivell);
+        if (canvasManager != null)
+        {
+            canvasManager.activaCanviaLevelText(currentNivell);
+        }
         pathState = 0f;
         animator.SetBool("isMoving", false);
         animator.SetBool("Climb", false);
@@ -520,7 +528,10 @@ public class RedPlayerMovement : MonoBehaviour
         animator.SetBool("Climb", false);
         ResetMoveInputGate();
         yield return new WaitForSeconds(2f);
-        StartCoroutine(canvasManager.transitionRedExposureNegre(2f));
+        if (canvasManager != null)
+        {
+            StartCoroutine(canvasManager.transitionRedExposureNegre(2f));
+        }
         animator.SetBool("isFalling", false);
         yield return new WaitForSeconds(1f);
         ClearPhysicsMotion();
@@ -562,7 +573,10 @@ public class RedPlayerMovement : MonoBehaviour
         }
         else
         {
-            canvasManager.guanyaCredits();
+            if (canvasManager != null)
+            {
+                canvasManager.guanyaCredits();
+            }
         }
     }
 

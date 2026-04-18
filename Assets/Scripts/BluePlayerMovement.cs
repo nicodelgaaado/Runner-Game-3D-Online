@@ -72,6 +72,11 @@ public class BluePlayerMovement : MonoBehaviour
 
     void Start()
     {
+        if (RunnerGame.Online.OnlineSceneRuntime.DisableLegacyRuntimeComponentIfBlocked(this, deactivateGameObject: true))
+        {
+            return;
+        }
+
         animator = GetComponent<Animator>();
         myRigidbody = GetComponent<Rigidbody>();
         myTransform = transform;
@@ -516,7 +521,10 @@ public class BluePlayerMovement : MonoBehaviour
         animator.SetBool("Climb", false);
         ResetMoveInputGate();
         yield return new WaitForSeconds(2f);
-        StartCoroutine(canvasManager.transitionBlueExposureNegre(2f));
+        if (canvasManager != null)
+        {
+            StartCoroutine(canvasManager.transitionBlueExposureNegre(2f));
+        }
         animator.SetBool("isFalling", false);
         yield return new WaitForSeconds(1f);
         ClearPhysicsMotion();
@@ -559,7 +567,10 @@ public class BluePlayerMovement : MonoBehaviour
         }
         else
         {
-            canvasManager.guanyaCredits();
+            if (canvasManager != null)
+            {
+                canvasManager.guanyaCredits();
+            }
         }
     }
 

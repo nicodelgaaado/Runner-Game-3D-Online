@@ -19,6 +19,28 @@ namespace RunnerGame.Online
         private bool usingFallbackCamera;
         private bool missingRigLogged;
 
+        public bool HasActiveCameraBinding
+        {
+            get
+            {
+                if (usingFallbackCamera)
+                {
+                    return fallbackCamera != null && fallbackCamera.enabled;
+                }
+
+                if (currentSlot == RunnerSpawnSlot.None)
+                {
+                    return false;
+                }
+
+                CameraRig rig = ResolveRig(currentSlot);
+                return rig.MainCamera != null
+                    && rig.MainCamera.enabled
+                    && rig.VirtualCamera != null
+                    && rig.VirtualCamera.enabled;
+            }
+        }
+
         private struct CameraRig
         {
             public string MainCameraName;
@@ -86,17 +108,19 @@ namespace RunnerGame.Online
                 return;
             }
 
-            if (TryActivateLegacyRig(currentSlot))
+            Scene activeScene = SceneManager.GetActiveScene();
+            if (OnlineSceneRuntime.ShouldUseLegacyGameplayCameraRig(activeScene) && TryActivateLegacyRig(currentSlot))
             {
                 DisposeFallbackCamera();
                 usingFallbackCamera = false;
                 return;
             }
 
+            DisableAllLegacyRigs();
             EnsureFallbackCamera();
             usingFallbackCamera = true;
 
-            if (!missingRigLogged)
+            if (OnlineSceneRuntime.ShouldUseLegacyGameplayCameraRig(activeScene) && !missingRigLogged)
             {
                 Debug.LogError($"Failed to bind legacy camera rig for slot '{currentSlot}'. Falling back to OnlineLocalCamera.");
                 missingRigLogged = true;

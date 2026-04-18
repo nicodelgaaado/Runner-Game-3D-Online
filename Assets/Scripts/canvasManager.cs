@@ -35,6 +35,11 @@ public class canvasManager : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        if (RunnerGame.Online.OnlineSceneRuntime.DisableLegacyRuntimeComponentIfBlocked(this, deactivateGameObject: true))
+        {
+            return;
+        }
+
         enMenu = true;
         CreditsCamera.enabled = false;
         enPausa = false;
