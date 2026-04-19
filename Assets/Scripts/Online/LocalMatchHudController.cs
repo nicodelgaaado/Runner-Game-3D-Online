@@ -15,7 +15,20 @@ namespace RunnerGame.Online
             if (keyboard != null && keyboard.escapeKey.wasPressedThisFrame)
             {
                 pauseOverlayVisible = !pauseOverlayVisible;
+                OnlineAudioDirector.Instance?.PlayUiSelect();
+                OnlineAudioDirector.Instance?.SetGameplayMusicPaused(pauseOverlayVisible);
             }
+        }
+
+        private void OnDisable()
+        {
+            if (!pauseOverlayVisible)
+            {
+                return;
+            }
+
+            pauseOverlayVisible = false;
+            OnlineAudioDirector.Instance?.SetGameplayMusicPaused(false);
         }
 
         private void OnGUI()
@@ -78,12 +91,16 @@ namespace RunnerGame.Online
 
             if (GUILayout.Button("Return To Menu") && SessionBootstrapper.Instance != null)
             {
+                OnlineAudioDirector.Instance?.PlayUiSelect();
+                OnlineAudioDirector.Instance?.SetGameplayMusicPaused(false);
                 SessionBootstrapper.Instance.LeaveSession();
             }
 
             if (GUILayout.Button("Close"))
             {
+                OnlineAudioDirector.Instance?.PlayUiSelect();
                 pauseOverlayVisible = false;
+                OnlineAudioDirector.Instance?.SetGameplayMusicPaused(false);
             }
 
             GUILayout.EndArea();

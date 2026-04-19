@@ -192,6 +192,7 @@ namespace RunnerGame.Online
         private float bootstrapLinearFogStart;
         private float bootstrapLinearFogEnd;
         private Color bootstrapSubtractiveShadowColor;
+        private OnlineAudioDirector audioDirector;
 
         public static SessionBootstrapper Instance { get; private set; }
 
@@ -211,6 +212,7 @@ namespace RunnerGame.Online
             DontDestroyOnLoad(gameObject);
             ConfigureRuntimeForCurrentPlatform();
             CaptureBootstrapRenderSettings();
+            EnsureAudioDirector().PlayMenuLoop();
         }
 
         private void OnDestroy()
@@ -259,6 +261,7 @@ namespace RunnerGame.Online
                 return;
             }
 
+            EnsureAudioDirector().SetGameplayMusicPaused(false);
             _ = LeaveSessionInternalAsync(loadBootstrapScene: true, "Returned to menu.");
         }
 
@@ -488,6 +491,11 @@ namespace RunnerGame.Online
             if (loadBootstrapScene && SceneManager.GetActiveScene().name != BootstrapSceneName)
             {
                 SceneManager.LoadScene(BootstrapSceneName, LoadSceneMode.Single);
+            }
+
+            if (loadBootstrapScene || SceneManager.GetActiveScene().name == BootstrapSceneName)
+            {
+                EnsureAudioDirector().PlayMenuLoop();
             }
         }
 
@@ -928,6 +936,7 @@ namespace RunnerGame.Online
                 ClearGameplayLoadWatchdog();
                 state = BootstrapState.WaitingForSceneLoad;
                 statusMessage = "Race scene ready.";
+                EnsureAudioDirector().PlayGameplayLoop();
                 LogSessionSnapshot($"{context}: gameplay presentation ready", networkRunner);
                 return;
             }
@@ -1197,6 +1206,7 @@ namespace RunnerGame.Online
             GUI.enabled = state == BootstrapState.Ready || state == BootstrapState.Error;
             if (GUILayout.Button("Host Private Match"))
             {
+                EnsureAudioDirector().PlayUiSelect();
                 _ = CreatePrivateMatchAsync();
             }
 
@@ -1205,6 +1215,7 @@ namespace RunnerGame.Online
             joinCodeInput = GUILayout.TextField(joinCodeInput, 16);
             if (GUILayout.Button("Join Match"))
             {
+                EnsureAudioDirector().PlayUiSelect();
                 _ = JoinPrivateMatchAsync(joinCodeInput);
             }
 
@@ -1317,8 +1328,23 @@ namespace RunnerGame.Online
                 sceneLoadRequested = false;
                 ClearGameplayLoadWatchdog();
                 RestoreBootstrapRenderSettings(networkRunner);
+                EnsureAudioDirector().PlayMenuLoop();
                 UpdateBootstrapStatus(networkRunner);
             }
+        }
+
+        private OnlineAudioDirector EnsureAudioDirector()
+        {
+            if (audioDirector == null)
+            {
+                audioDirector = GetComponent<OnlineAudioDirector>();
+                if (audioDirector == null)
+                {
+                    audioDirector = gameObject.AddComponent<OnlineAudioDirector>();
+                }
+            }
+
+            return audioDirector;
         }
 
         public void OnConnectedToServer(NetworkRunner networkRunner) { }

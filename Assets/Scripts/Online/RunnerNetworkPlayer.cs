@@ -9,6 +9,7 @@ namespace RunnerGame.Online
     [RequireComponent(typeof(RunnerInputAdapter))]
     [RequireComponent(typeof(RunnerPresentation))]
     [RequireComponent(typeof(LocalPlayerCameraBinder))]
+    [RequireComponent(typeof(RunnerAudioFeedback))]
     public class RunnerNetworkPlayer : NetworkBehaviour
     {
         private const string RedCollisionLayerName = "RedCollision";
@@ -26,11 +27,13 @@ namespace RunnerGame.Online
         [Networked] private TickTimer RespawnTimer { get; set; }
         [Networked] private PlayerRef ReplicatedOwnerPlayer { get; set; }
         [Networked] private RunnerSpawnSlot ReplicatedSpawnSlot { get; set; }
+        [Networked] private int HazardHitAudioNonce { get; set; }
 
         private RunnerMotor motor;
         private RunnerInputAdapter inputAdapter;
         private RunnerPresentation presentation;
         private LocalPlayerCameraBinder cameraBinder;
+        private RunnerAudioFeedback audioFeedback;
         private RaceRoundState lastObservedRoundState;
         private RunnerSpawnSlot lastVisualSlot = RunnerSpawnSlot.None;
         private bool finishReportedForRound;
@@ -63,6 +66,11 @@ namespace RunnerGame.Online
             inputAdapter = GetComponent<RunnerInputAdapter>();
             presentation = GetComponent<RunnerPresentation>();
             cameraBinder = GetComponent<LocalPlayerCameraBinder>();
+            audioFeedback = GetComponent<RunnerAudioFeedback>();
+            if (audioFeedback == null)
+            {
+                audioFeedback = gameObject.AddComponent<RunnerAudioFeedback>();
+            }
         }
 
         public override void Spawned()
@@ -95,7 +103,8 @@ namespace RunnerGame.Online
             ConfigurePlayerCollisionLayers();
             IgnoreOtherPlayerCollisions();
             TryApplyInitialPlacement();
-            RefreshPresentation();
+            audioFeedback.StopAll();
+            RefreshPresentation(GetObservedRoundState());
         }
 
         public override void Despawned(NetworkRunner runner, bool hasState)
@@ -108,6 +117,7 @@ namespace RunnerGame.Online
 
             lastVisualSlot = RunnerSpawnSlot.None;
             initialPlacementApplied = false;
+            audioFeedback.StopAll();
         }
 
         public override void FixedUpdateNetwork()
@@ -195,7 +205,7 @@ namespace RunnerGame.Online
             }
 
             ReportPresentationWarnings(slot);
-            RefreshPresentation();
+            RefreshPresentation(GetObservedRoundState());
         }
 
         private void OnCollisionEnter(Collision collision)
@@ -212,6 +222,7 @@ namespace RunnerGame.Online
             }
 
             motor.ApplyHit(force, enableGravity);
+            HazardHitAudioNonce++;
             FallingState = true;
             MovingState = false;
             ClimbingState = false;
@@ -219,7 +230,7 @@ namespace RunnerGame.Online
             SyncNetworkStateFromMotor();
         }
 
-        private void RefreshPresentation()
+        private void RefreshPresentation(RaceRoundState roundState)
         {
             bool isWinner = NetworkRaceManager.Instance != null && NetworkRaceManager.Instance.IsPlayerWinner(this);
             bool isLoser = NetworkRaceManager.Instance != null && NetworkRaceManager.Instance.IsPlayerLoser(this);
@@ -231,6 +242,15 @@ namespace RunnerGame.Online
                 ClimbingState,
                 isWinner,
                 isLoser);
+
+            audioFeedback.UpdateFeedback(
+                roundState,
+                MovingState,
+                FallingState,
+                ClimbingState,
+                RespawnTimer.IsRunning,
+                isWinner,
+                HazardHitAudioNonce);
         }
 
         private void HandleRoundStateChanged(RaceRoundState roundState)
@@ -500,6 +520,11 @@ namespace RunnerGame.Online
             {
                 warnedMissingVisualPrototype = false;
             }
+        }
+
+        private RaceRoundState GetObservedRoundState()
+        {
+            return NetworkRaceManager.Instance != null ? NetworkRaceManager.Instance.RoundState : lastObservedRoundState;
         }
 
         private PlayerRef ResolveAuthoritativeOwner()
