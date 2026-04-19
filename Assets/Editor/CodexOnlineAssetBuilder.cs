@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Fusion;
 using RunnerGame.Online;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -8,7 +9,9 @@ using UnityEngine;
 public static class CodexOnlineAssetBuilder
 {
     private const string PlayerPrefabPath = "Assets/Resources/RunnerNetworkPlayer.prefab";
+    private const string RaceManagerPrefabPath = "Assets/Resources/NetworkRaceManager.prefab";
     private const string BootstrapScenePath = "Assets/Scenes/Bootstrap.unity";
+    private const string GameplayScenePath = "Assets/Scenes/Joc.unity";
     private const string BuilderLogPath = "codex-online-builder.log";
 
     [MenuItem("Codex/Build Online Multiplayer Assets")]
@@ -19,7 +22,8 @@ public static class CodexOnlineAssetBuilder
         {
             EnsureFolders();
             BuildPlayerPrefab();
-            BuildBootstrapScene();
+            BuildRaceManagerPrefab();
+            EnsureBootstrapScene();
             ConfigureBuildSettings();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -34,7 +38,6 @@ public static class CodexOnlineAssetBuilder
 
     private static void EnsureFolders()
     {
-        Log("Ensuring folders.");
         if (!AssetDatabase.IsValidFolder("Assets/Resources"))
         {
             AssetDatabase.CreateFolder("Assets", "Resources");
@@ -44,16 +47,18 @@ public static class CodexOnlineAssetBuilder
 
     private static void BuildPlayerPrefab()
     {
-        Log("Building player prefab.");
+        Log("Building Fusion player prefab.");
         GameObject root = new GameObject("RunnerNetworkPlayer");
-        root.AddComponent<Rigidbody>();
-        CapsuleCollider collider = root.AddComponent<CapsuleCollider>();
-        collider.center = new Vector3(0f, 2.6f, 0f);
-        collider.height = 5f;
-        collider.radius = 1.3f;
+        root.AddComponent<NetworkObject>();
 
-        AddPackageComponent(root, "Unity.Netcode.NetworkObject, Unity.Netcode.Runtime");
-        AddPackageComponent(root, "Unity.Netcode.Components.NetworkTransform, Unity.Netcode.Components");
+        Rigidbody body = root.AddComponent<Rigidbody>();
+        body.mass = 100f;
+        body.constraints = RigidbodyConstraints.FreezeRotation;
+        body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
+        BoxCollider collider = root.AddComponent<BoxCollider>();
+        collider.center = new Vector3(0f, 2.6f, 0f);
+        collider.size = new Vector3(2.6f, 5f, 2.6f);
 
         root.AddComponent<RunnerMotor>();
         root.AddComponent<RunnerInputAdapter>();
@@ -63,31 +68,33 @@ public static class CodexOnlineAssetBuilder
 
         PrefabUtility.SaveAsPrefabAsset(root, PlayerPrefabPath);
         UnityEngine.Object.DestroyImmediate(root);
-        Log("Saved player prefab.");
+        Log("Saved Fusion player prefab.");
     }
 
-    private static void BuildBootstrapScene()
+    private static void BuildRaceManagerPrefab()
     {
-        Log("Building bootstrap scene.");
-        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        Log("Building Fusion race manager prefab.");
+        GameObject root = new GameObject("NetworkRaceManager");
+        root.AddComponent<NetworkObject>();
+        root.AddComponent<NetworkRaceManager>();
+        PrefabUtility.SaveAsPrefabAsset(root, RaceManagerPrefabPath);
+        UnityEngine.Object.DestroyImmediate(root);
+        Log("Saved Fusion race manager prefab.");
+    }
 
-        GameObject cameraObject = new GameObject("BootstrapCamera");
-        Camera camera = cameraObject.AddComponent<Camera>();
-        camera.tag = "MainCamera";
-        cameraObject.AddComponent<AudioListener>();
-        cameraObject.transform.position = new Vector3(0f, 8f, -14f);
-        cameraObject.transform.rotation = Quaternion.Euler(20f, 0f, 0f);
-
-        GameObject lightObject = new GameObject("Directional Light");
-        Light light = lightObject.AddComponent<Light>();
-        light.type = LightType.Directional;
-        lightObject.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
-
-        GameObject bootstrapper = new GameObject("SessionBootstrapper");
-        bootstrapper.AddComponent<SessionBootstrapper>();
+    private static void EnsureBootstrapScene()
+    {
+        Log("Ensuring bootstrap scene contains SessionBootstrapper.");
+        var scene = EditorSceneManager.OpenScene(BootstrapScenePath, OpenSceneMode.Single);
+        SessionBootstrapper bootstrapper = UnityEngine.Object.FindAnyObjectByType<SessionBootstrapper>(FindObjectsInactive.Include);
+        if (bootstrapper == null)
+        {
+            GameObject bootstrapperObject = new GameObject("SessionBootstrapper");
+            bootstrapperObject.AddComponent<SessionBootstrapper>();
+            Log("Created SessionBootstrapper in Bootstrap scene.");
+        }
 
         EditorSceneManager.SaveScene(scene, BootstrapScenePath);
-        Log("Saved bootstrap scene.");
     }
 
     private static void ConfigureBuildSettings()
@@ -96,21 +103,8 @@ public static class CodexOnlineAssetBuilder
         EditorBuildSettings.scenes = new[]
         {
             new EditorBuildSettingsScene(BootstrapScenePath, true),
-            new EditorBuildSettingsScene("Assets/Scenes/Joc.unity", true)
+            new EditorBuildSettingsScene(GameplayScenePath, true)
         };
-
-        Log("Configured build settings.");
-    }
-
-    private static void AddPackageComponent(GameObject target, string assemblyQualifiedTypeName)
-    {
-        Type type = Type.GetType(assemblyQualifiedTypeName);
-        if (type == null)
-        {
-            throw new InvalidOperationException($"Missing package type: {assemblyQualifiedTypeName}");
-        }
-
-        target.AddComponent(type);
     }
 
     private static void Log(string message)

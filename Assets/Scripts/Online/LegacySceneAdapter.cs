@@ -9,171 +9,69 @@ namespace RunnerGame.Online
 {
     public static class LegacySceneAdapter
     {
-        private static readonly string[] MenuCameraNames =
-        {
-            "MenuCamera",
-            "CreditsCamera"
-        };
-
         private const string OnlineDirectionalLightName = "OnlineDirectionalLight";
         private const string BootstrapDirectionalLightName = "Directional Light";
         private const string BootstrapDirectionalLightTemplateName = "BootstrapDirectionalLightTemplate";
+        private const string GameplaySceneName = "Joc";
+        private const string MenuCameraName = "MenuCamera";
+        private const string CreditsCameraName = "CreditsCamera";
+        private const string MainBlueCameraName = "MainBlueCamera";
+        private const string MainRedCameraName = "MainRedCamera";
+        private const string BlueVirtualCameraName = "BlueCamera";
+        private const string RedVirtualCameraName = "RedCamera";
+        private const string RedVisualCloneName = "RedVisual";
+        private const string BlueVisualCloneName = "BlueVisual";
 
         private static GameObject redPrototype;
         private static GameObject bluePrototype;
         private static ObstacleManager obstacleManager;
         private static GameObject bootstrapDirectionalLightTemplate;
         private static GameObject onlineDirectionalLightInstance;
+        private static readonly HashSet<GameObject> warnedRuntimePrototypeCandidates = new HashSet<GameObject>();
+        private static readonly HashSet<RunnerSpawnSlot> warnedPrototypeReplacementSlots = new HashSet<RunnerSpawnSlot>();
 
         public static ObstacleManager ObstacleManager => obstacleManager;
 
         public static void HandleSceneLoaded(Scene scene)
         {
-            if (scene.name != "Bootstrap")
+            if (scene.name == "Bootstrap")
             {
+                CaptureBootstrapDirectionalLightTemplate(scene);
+                DestroyOnlineDirectionalLight();
+                RefreshSceneLightingEnvironment();
                 return;
             }
 
-            CaptureBootstrapDirectionalLightTemplate(scene);
-            DestroyOnlineDirectionalLight();
-            RefreshSceneLightingEnvironment();
+            if (scene.name == "Joc" && SessionRuntime.Runner != null && SessionRuntime.Runner.IsRunning)
+            {
+                SuppressLegacyLocalRuntime(scene);
+            }
         }
 
         public static void InitializeForOnlineScene()
         {
             EnsureGameplayLighting();
             RefreshSceneLightingEnvironment();
+            Scene gameplayScene = SceneManager.GetSceneByName(GameplaySceneName);
+            SuppressLegacyLocalRuntime(gameplayScene);
+            CaptureGameplayVisualPrototypes(gameplayScene);
 
-            RedPlayerMovement redPlayer = Object.FindAnyObjectByType<RedPlayerMovement>(FindObjectsInactive.Include);
-            BluePlayerMovement bluePlayer = Object.FindAnyObjectByType<BluePlayerMovement>(FindObjectsInactive.Include);
-            obstacleManager = Object.FindAnyObjectByType<ObstacleManager>(FindObjectsInactive.Include);
+            obstacleManager = FindComponentInScene<ObstacleManager>(gameplayScene);
+            if (obstacleManager == null)
+            {
+                obstacleManager = Object.FindAnyObjectByType<ObstacleManager>(FindObjectsInactive.Include);
+            }
 
-            GlobalVolumeManager volumeManager = Object.FindAnyObjectByType<GlobalVolumeManager>(FindObjectsInactive.Include);
+            GlobalVolumeManager volumeManager = FindComponentInScene<GlobalVolumeManager>(gameplayScene)
+                ?? Object.FindAnyObjectByType<GlobalVolumeManager>(FindObjectsInactive.Include);
             if (volumeManager != null)
             {
                 volumeManager.Color();
                 volumeManager.clearBlur();
             }
 
-            if (redPlayer != null)
-            {
-                redPrototype = redPlayer.gameObject;
-                redPlayer.enabled = false;
-                redPrototype.SetActive(false);
-            }
-
-            if (bluePlayer != null)
-            {
-                bluePrototype = bluePlayer.gameObject;
-                bluePlayer.enabled = false;
-                bluePrototype.SetActive(false);
-            }
-
-            canvasManager legacyCanvas = Object.FindAnyObjectByType<canvasManager>(FindObjectsInactive.Include);
-            if (legacyCanvas != null)
-            {
-                legacyCanvas.enabled = false;
-
-                if (legacyCanvas.Menu != null)
-                {
-                    legacyCanvas.Menu.gameObject.SetActive(false);
-                }
-
-                if (legacyCanvas.Pause != null)
-                {
-                    legacyCanvas.Pause.gameObject.SetActive(false);
-                }
-
-                if (legacyCanvas.Credits != null)
-                {
-                    legacyCanvas.Credits.gameObject.SetActive(false);
-                }
-
-                if (legacyCanvas.Instructions != null)
-                {
-                    legacyCanvas.Instructions.gameObject.SetActive(false);
-                }
-
-                if (legacyCanvas.cameraMenu != null)
-                {
-                    legacyCanvas.cameraMenu.gameObject.SetActive(false);
-                }
-
-                if (legacyCanvas.CreditsCamera != null)
-                {
-                    legacyCanvas.CreditsCamera.gameObject.SetActive(false);
-                }
-
-                legacyCanvas.gameObject.SetActive(false);
-            }
-
-            EventSystem eventSystem = Object.FindAnyObjectByType<EventSystem>(FindObjectsInactive.Include);
-            if (eventSystem != null)
-            {
-                eventSystem.gameObject.SetActive(false);
-            }
-
-            foreach (Canvas canvas in Object.FindObjectsByType<Canvas>(FindObjectsInactive.Include))
-            {
-                if (canvas == null)
-                {
-                    continue;
-                }
-
-                canvas.enabled = false;
-                canvas.gameObject.SetActive(false);
-            }
-
-            foreach (AudioListener listener in Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Include))
-            {
-                if (listener == null || listener.gameObject.name == "OnlineLocalCamera")
-                {
-                    continue;
-                }
-
-                listener.enabled = false;
-            }
-
-            foreach (CinemachineBrain brain in Object.FindObjectsByType<CinemachineBrain>(FindObjectsInactive.Include))
-            {
-                if (brain == null)
-                {
-                    continue;
-                }
-
-                brain.enabled = false;
-            }
-
-            foreach (CinemachineVirtualCamera virtualCamera in Object.FindObjectsByType<CinemachineVirtualCamera>(FindObjectsInactive.Include))
-            {
-                if (virtualCamera == null)
-                {
-                    continue;
-                }
-
-                virtualCamera.enabled = false;
-                virtualCamera.gameObject.SetActive(false);
-            }
-
-            foreach (Camera camera in Object.FindObjectsByType<Camera>(FindObjectsInactive.Include))
-            {
-                if (camera == null || camera.gameObject.name == "OnlineLocalCamera")
-                {
-                    continue;
-                }
-
-                camera.enabled = false;
-                camera.gameObject.SetActive(false);
-            }
-
-            foreach (string cameraName in MenuCameraNames)
-            {
-                GameObject cameraObject = GameObject.Find(cameraName);
-                if (cameraObject != null)
-                {
-                    cameraObject.SetActive(false);
-                }
-            }
+            DisableLegacyCameraRig(gameplayScene, MainBlueCameraName, BlueVirtualCameraName);
+            DisableLegacyCameraRig(gameplayScene, MainRedCameraName, RedVirtualCameraName);
         }
 
         public static IReadOnlyList<LevelCourseDefinition> BuildCourses()
@@ -211,20 +109,22 @@ namespace RunnerGame.Online
             }
 
             GameObject clone = Object.Instantiate(source, parent, false);
-            clone.name = $"{slot}Visual";
+            clone.name = slot == RunnerSpawnSlot.Blue ? BlueVisualCloneName : RedVisualCloneName;
             clone.transform.localPosition = Vector3.zero;
             clone.transform.localRotation = Quaternion.identity;
             clone.transform.localScale = Vector3.one;
-            clone.SetActive(true);
+            clone.SetActive(false);
             SanitizeVisualClone(clone, slot);
+            clone.SetActive(true);
             return clone;
         }
 
         private static PathCreator[] GetLegacyPathCreators()
         {
             List<PathCreator> creators = new List<PathCreator>();
-            RedPlayerMovement redPlayer = Object.FindAnyObjectByType<RedPlayerMovement>(FindObjectsInactive.Include);
-            BluePlayerMovement bluePlayer = Object.FindAnyObjectByType<BluePlayerMovement>(FindObjectsInactive.Include);
+            Scene gameplayScene = SceneManager.GetSceneByName(GameplaySceneName);
+            RedPlayerMovement redPlayer = GetStablePrototypeComponent<RedPlayerMovement>(gameplayScene, redPrototype, RunnerSpawnSlot.Red);
+            BluePlayerMovement bluePlayer = GetStablePrototypeComponent<BluePlayerMovement>(gameplayScene, bluePrototype, RunnerSpawnSlot.Blue);
 
             if (redPlayer != null)
             {
@@ -256,14 +156,24 @@ namespace RunnerGame.Online
 
         private static void EnsureGameplayLighting()
         {
-            foreach (Light light in Object.FindObjectsByType<Light>(FindObjectsInactive.Include))
+            if (TryGetGameplayScene(out Scene gameplayScene))
             {
-                if (light != null && light.type == LightType.Directional && light.gameObject.activeInHierarchy)
+                if (TryBindDirectionalLightFromScene(gameplayScene, activeOnly: true, activateIfNeeded: false))
                 {
-                    light.enabled = true;
-                    RenderSettings.sun = light;
+                    DestroyOnlineDirectionalLight();
                     return;
                 }
+
+                if (TryBindDirectionalLightFromScene(gameplayScene, activeOnly: false, activateIfNeeded: true))
+                {
+                    DestroyOnlineDirectionalLight();
+                    return;
+                }
+            }
+
+            if (TryBindActiveDirectionalLightFromLoadedScenes())
+            {
+                return;
             }
 
             if (onlineDirectionalLightInstance == null && bootstrapDirectionalLightTemplate != null)
@@ -289,24 +199,380 @@ namespace RunnerGame.Online
             }
         }
 
+        public static void SuppressLegacyLocalRuntime(Scene scene)
+        {
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                return;
+            }
+
+            canvasManager legacyCanvas = FindComponentInScene<canvasManager>(scene);
+            if (legacyCanvas != null)
+            {
+                legacyCanvas.enabled = false;
+
+                DisableCanvas(legacyCanvas.Menu);
+                DisableCanvas(legacyCanvas.Pause);
+                DisableCanvas(legacyCanvas.Credits);
+                DisableCanvas(legacyCanvas.Instructions);
+
+                DisableCanvasGroupRoot(legacyCanvas.BlackBlueCanvasGroup);
+                DisableCanvasGroupRoot(legacyCanvas.BlackRedCanvasGroup);
+                DisableCanvasGroupRoot(legacyCanvas.LevelText1);
+                DisableCanvasGroupRoot(legacyCanvas.LevelText2);
+                DisableCanvasGroupRoot(legacyCanvas.LevelText3);
+                DisableCanvasGroupRoot(legacyCanvas.LevelText4);
+                DisableCanvasGroupRoot(legacyCanvas.LevelText5);
+
+                DisableCameraObject(legacyCanvas.cameraMenu);
+                DisableCameraObject(legacyCanvas.CreditsCamera);
+                legacyCanvas.gameObject.SetActive(false);
+            }
+
+            RedPlayerMovement redPlayer = GetStablePrototypeComponent<RedPlayerMovement>(scene, redPrototype, RunnerSpawnSlot.Red);
+            if (redPlayer != null)
+            {
+                redPlayer.enabled = false;
+                redPlayer.gameObject.SetActive(false);
+            }
+
+            BluePlayerMovement bluePlayer = GetStablePrototypeComponent<BluePlayerMovement>(scene, bluePrototype, RunnerSpawnSlot.Blue);
+            if (bluePlayer != null)
+            {
+                bluePlayer.enabled = false;
+                bluePlayer.gameObject.SetActive(false);
+            }
+
+            EventSystem eventSystem = FindComponentInScene<EventSystem>(scene);
+            if (eventSystem != null)
+            {
+                eventSystem.gameObject.SetActive(false);
+            }
+
+            DisableLegacyCameraRig(scene, MainBlueCameraName, BlueVirtualCameraName);
+            DisableLegacyCameraRig(scene, MainRedCameraName, RedVirtualCameraName);
+            DisableRootObject(scene, MenuCameraName);
+            DisableRootObject(scene, CreditsCameraName);
+        }
+
         private static void RefreshSceneLightingEnvironment()
         {
-            Light activeDirectionalLight = null;
+            if (TryGetGameplayScene(out Scene gameplayScene)
+                && TryBindDirectionalLightFromScene(gameplayScene, activeOnly: true, activateIfNeeded: false))
+            {
+                DynamicGI.UpdateEnvironment();
+                return;
+            }
+
+            TryBindActiveDirectionalLightFromLoadedScenes();
+            DynamicGI.UpdateEnvironment();
+        }
+
+        private static bool TryGetGameplayScene(out Scene scene)
+        {
+            scene = SceneManager.GetSceneByName(GameplaySceneName);
+            return scene.IsValid() && scene.isLoaded;
+        }
+
+        private static bool TryBindDirectionalLightFromScene(Scene scene, bool activeOnly, bool activateIfNeeded)
+        {
+            Light sceneDirectionalLight = FindDirectionalLight(scene, activeOnly);
+            if (sceneDirectionalLight == null)
+            {
+                return false;
+            }
+
+            if (activateIfNeeded && !sceneDirectionalLight.gameObject.activeSelf)
+            {
+                sceneDirectionalLight.gameObject.SetActive(true);
+            }
+
+            sceneDirectionalLight.enabled = true;
+            RenderSettings.sun = sceneDirectionalLight;
+            return true;
+        }
+
+        private static bool TryBindActiveDirectionalLightFromLoadedScenes()
+        {
             foreach (Light light in Object.FindObjectsByType<Light>(FindObjectsInactive.Include))
             {
-                if (light != null && light.type == LightType.Directional && light.enabled && light.gameObject.activeInHierarchy)
+                if (light == null || light.type != LightType.Directional || !light.gameObject.activeInHierarchy)
                 {
-                    activeDirectionalLight = light;
-                    break;
+                    continue;
+                }
+
+                light.enabled = true;
+                RenderSettings.sun = light;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static T FindComponentInScene<T>(Scene scene) where T : Component
+        {
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                return null;
+            }
+
+            foreach (GameObject rootObject in scene.GetRootGameObjects())
+            {
+                if (rootObject == null)
+                {
+                    continue;
+                }
+
+                T component = rootObject.GetComponentInChildren<T>(true);
+                if (component != null)
+                {
+                    return component;
                 }
             }
 
-            if (activeDirectionalLight != null)
+            return null;
+        }
+
+        private static void CaptureGameplayVisualPrototypes(Scene scene)
+        {
+            redPrototype = CaptureLegacyPrototype(scene, redPrototype, RunnerSpawnSlot.Red);
+            bluePrototype = CaptureLegacyPrototype(scene, bluePrototype, RunnerSpawnSlot.Blue);
+
+            EnsureLegacyPrototypeDisabled(redPrototype);
+            EnsureLegacyPrototypeDisabled(bluePrototype);
+        }
+
+        private static GameObject CaptureLegacyPrototype(Scene scene, GameObject currentPrototype, RunnerSpawnSlot slot)
+        {
+            GameObject candidate = FindLegacyPrototypeObjectInScene(scene, slot);
+            if (candidate == null)
             {
-                RenderSettings.sun = activeDirectionalLight;
+                return currentPrototype;
             }
 
-            DynamicGI.UpdateEnvironment();
+            if (IsStablePrototypeReference(currentPrototype, scene))
+            {
+                if (currentPrototype != candidate && warnedPrototypeReplacementSlots.Add(slot))
+                {
+                    Debug.LogWarning($"LegacySceneAdapter ignored a {slot} prototype replacement candidate '{candidate.name}' because a stable scene prototype is already captured.");
+                }
+
+                return currentPrototype;
+            }
+
+            return candidate;
+        }
+
+        private static GameObject FindLegacyPrototypeObjectInScene(Scene scene, RunnerSpawnSlot slot)
+        {
+            return slot switch
+            {
+                RunnerSpawnSlot.Red => FindLegacyPrototypeComponentInScene<RedPlayerMovement>(scene)?.gameObject,
+                RunnerSpawnSlot.Blue => FindLegacyPrototypeComponentInScene<BluePlayerMovement>(scene)?.gameObject,
+                _ => null
+            };
+        }
+
+        private static T GetStablePrototypeComponent<T>(Scene scene, GameObject prototype, RunnerSpawnSlot slot) where T : Behaviour
+        {
+            if (IsStablePrototypeReference(prototype, scene))
+            {
+                return prototype.GetComponent<T>();
+            }
+
+            return slot switch
+            {
+                RunnerSpawnSlot.Red when typeof(T) == typeof(RedPlayerMovement) => FindLegacyPrototypeComponentInScene<RedPlayerMovement>(scene) as T,
+                RunnerSpawnSlot.Blue when typeof(T) == typeof(BluePlayerMovement) => FindLegacyPrototypeComponentInScene<BluePlayerMovement>(scene) as T,
+                _ => null
+            };
+        }
+
+        private static T FindLegacyPrototypeComponentInScene<T>(Scene scene) where T : Behaviour
+        {
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                return null;
+            }
+
+            foreach (GameObject rootObject in scene.GetRootGameObjects())
+            {
+                if (rootObject == null)
+                {
+                    continue;
+                }
+
+                foreach (T component in rootObject.GetComponentsInChildren<T>(true))
+                {
+                    if (component != null && IsEligiblePrototypeCandidate(component.gameObject, scene))
+                    {
+                        return component;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsEligiblePrototypeCandidate(GameObject candidate, Scene scene)
+        {
+            if (candidate == null || !scene.IsValid() || candidate.scene != scene)
+            {
+                return false;
+            }
+
+            if (candidate.GetComponentInParent<RunnerNetworkPlayer>(true) != null)
+            {
+                if (warnedRuntimePrototypeCandidates.Add(candidate))
+                {
+                    Debug.LogWarning($"LegacySceneAdapter ignored runtime visual '{candidate.name}' while capturing gameplay prototypes because it is parented under RunnerNetworkPlayer.");
+                }
+
+                return false;
+            }
+
+            return !IsRuntimeVisualCloneName(candidate.name);
+        }
+
+        private static bool IsStablePrototypeReference(GameObject prototype, Scene scene)
+        {
+            return prototype != null
+                && scene.IsValid()
+                && prototype.scene == scene
+                && !IsRuntimeVisualCloneName(prototype.name)
+                && prototype.GetComponentInParent<RunnerNetworkPlayer>(true) == null;
+        }
+
+        private static bool IsRuntimeVisualCloneName(string objectName)
+        {
+            return objectName == RedVisualCloneName || objectName == BlueVisualCloneName;
+        }
+
+        private static void EnsureLegacyPrototypeDisabled(GameObject prototype)
+        {
+            if (prototype == null)
+            {
+                return;
+            }
+
+            foreach (RedPlayerMovement redMovement in prototype.GetComponentsInChildren<RedPlayerMovement>(true))
+            {
+                redMovement.enabled = false;
+            }
+
+            foreach (BluePlayerMovement blueMovement in prototype.GetComponentsInChildren<BluePlayerMovement>(true))
+            {
+                blueMovement.enabled = false;
+            }
+
+            prototype.SetActive(false);
+        }
+
+        private static T FindComponentInSceneByName<T>(Scene scene, string objectName) where T : Component
+        {
+            if (!scene.IsValid() || !scene.isLoaded || string.IsNullOrWhiteSpace(objectName))
+            {
+                return null;
+            }
+
+            foreach (GameObject rootObject in scene.GetRootGameObjects())
+            {
+                if (rootObject == null)
+                {
+                    continue;
+                }
+
+                foreach (T component in rootObject.GetComponentsInChildren<T>(true))
+                {
+                    if (component != null && component.gameObject.name == objectName)
+                    {
+                        return component;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static void DisableCanvas(Canvas canvas)
+        {
+            if (canvas == null)
+            {
+                return;
+            }
+
+            canvas.enabled = false;
+            canvas.gameObject.SetActive(false);
+        }
+
+        private static void DisableCanvasGroupRoot(CanvasGroup canvasGroup)
+        {
+            if (canvasGroup == null)
+            {
+                return;
+            }
+
+            canvasGroup.alpha = 0f;
+            canvasGroup.interactable = false;
+            canvasGroup.blocksRaycasts = false;
+            canvasGroup.gameObject.SetActive(false);
+        }
+
+        private static void DisableCameraObject(Camera camera)
+        {
+            if (camera == null)
+            {
+                return;
+            }
+
+            camera.enabled = false;
+            camera.gameObject.SetActive(false);
+        }
+
+        private static void DisableRootObject(Scene scene, string objectName)
+        {
+            if (!scene.IsValid() || !scene.isLoaded || string.IsNullOrWhiteSpace(objectName))
+            {
+                return;
+            }
+
+            foreach (GameObject rootObject in scene.GetRootGameObjects())
+            {
+                if (rootObject != null && rootObject.name == objectName)
+                {
+                    rootObject.SetActive(false);
+                    return;
+                }
+            }
+        }
+
+        private static void DisableLegacyCameraRig(Scene scene, string mainCameraName, string virtualCameraName)
+        {
+            Camera mainCamera = FindComponentInSceneByName<Camera>(scene, mainCameraName);
+            if (mainCamera != null)
+            {
+                AudioListener audioListener = mainCamera.GetComponent<AudioListener>();
+                if (audioListener != null)
+                {
+                    audioListener.enabled = false;
+                }
+
+                CinemachineBrain brain = mainCamera.GetComponent<CinemachineBrain>();
+                if (brain != null)
+                {
+                    brain.enabled = false;
+                }
+
+                mainCamera.enabled = false;
+                mainCamera.gameObject.SetActive(false);
+            }
+
+            CinemachineVirtualCamera virtualCamera = FindComponentInSceneByName<CinemachineVirtualCamera>(scene, virtualCameraName);
+            if (virtualCamera != null)
+            {
+                virtualCamera.enabled = false;
+                virtualCamera.gameObject.SetActive(false);
+            }
         }
 
         private static void CaptureBootstrapDirectionalLightTemplate(Scene scene)
@@ -335,7 +601,18 @@ namespace RunnerGame.Online
             }
         }
 
+        private static Light FindDirectionalLight(Scene scene, bool activeOnly)
+        {
+            GameObject directionalLightObject = FindDirectionalLightObject(scene, activeOnly);
+            return directionalLightObject != null ? directionalLightObject.GetComponent<Light>() : null;
+        }
+
         private static GameObject FindDirectionalLightObject(Scene scene)
+        {
+            return FindDirectionalLightObject(scene, activeOnly: false);
+        }
+
+        private static GameObject FindDirectionalLightObject(Scene scene, bool activeOnly)
         {
             if (!scene.IsValid() || !scene.isLoaded)
             {
@@ -352,7 +629,7 @@ namespace RunnerGame.Online
                 if (rootObject.name == BootstrapDirectionalLightName)
                 {
                     Light namedLight = rootObject.GetComponent<Light>();
-                    if (namedLight != null && namedLight.type == LightType.Directional)
+                    if (IsDirectionalLightEligible(namedLight, activeOnly))
                     {
                         return rootObject;
                     }
@@ -360,7 +637,7 @@ namespace RunnerGame.Online
 
                 foreach (Light light in rootObject.GetComponentsInChildren<Light>(true))
                 {
-                    if (light != null && light.type == LightType.Directional)
+                    if (IsDirectionalLightEligible(light, activeOnly))
                     {
                         return light.gameObject;
                     }
@@ -370,6 +647,13 @@ namespace RunnerGame.Online
             return null;
         }
 
+        private static bool IsDirectionalLightEligible(Light light, bool activeOnly)
+        {
+            return light != null
+                && light.type == LightType.Directional
+                && (!activeOnly || light.gameObject.activeInHierarchy);
+        }
+
         private static void DestroyOnlineDirectionalLight()
         {
             if (onlineDirectionalLightInstance == null)
@@ -377,6 +661,7 @@ namespace RunnerGame.Online
                 return;
             }
 
+            onlineDirectionalLightInstance.SetActive(false);
             Object.Destroy(onlineDirectionalLightInstance);
             onlineDirectionalLightInstance = null;
         }
@@ -413,15 +698,15 @@ namespace RunnerGame.Online
                 Object.Destroy(light.gameObject);
             }
 
-            RedPlayerMovement redMovement = clone.GetComponent<RedPlayerMovement>();
-            if (redMovement != null)
+            foreach (RedPlayerMovement redMovement in clone.GetComponentsInChildren<RedPlayerMovement>(true))
             {
+                redMovement.enabled = false;
                 Object.Destroy(redMovement);
             }
 
-            BluePlayerMovement blueMovement = clone.GetComponent<BluePlayerMovement>();
-            if (blueMovement != null)
+            foreach (BluePlayerMovement blueMovement in clone.GetComponentsInChildren<BluePlayerMovement>(true))
             {
+                blueMovement.enabled = false;
                 Object.Destroy(blueMovement);
             }
         }

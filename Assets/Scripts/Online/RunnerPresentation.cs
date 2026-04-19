@@ -13,6 +13,8 @@ namespace RunnerGame.Online
         private GameObject activeVisual;
         private RunnerSpawnSlot activeSlot = RunnerSpawnSlot.None;
 
+        public bool HasActiveVisual => activeVisual != null;
+
         public void ApplyVisuals(RunnerSpawnSlot slot)
         {
             if (slot == RunnerSpawnSlot.None)

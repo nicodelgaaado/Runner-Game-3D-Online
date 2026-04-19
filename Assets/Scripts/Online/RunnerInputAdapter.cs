@@ -7,6 +7,11 @@ namespace RunnerGame.Online
     {
         public RunnerInputState Capture()
         {
+            return CaptureCurrentDevices();
+        }
+
+        public static RunnerInputState CaptureCurrentDevices()
+        {
             Keyboard keyboard = Keyboard.current;
             Gamepad gamepad = Gamepad.current;
 
@@ -19,7 +24,7 @@ namespace RunnerGame.Online
                 gamepad.buttonSouth.isPressed ||
                 gamepad.leftStick.up.isPressed);
 
-            return new RunnerInputState(keyboardMove || gamepadMove, 0);
+            return new RunnerInputState(keyboardMove || gamepadMove);
         }
     }
 }

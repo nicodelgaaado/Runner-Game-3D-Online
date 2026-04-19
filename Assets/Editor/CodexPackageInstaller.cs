@@ -14,11 +14,6 @@ public static class CodexPackageInstaller
     private const string LogFileName = "unity-package-install.log";
     private static readonly string[] PackageNames =
     {
-        "com.unity.netcode.gameobjects",
-        "com.unity.transport",
-        "com.unity.services.multiplayer",
-        "com.unity.services.authentication",
-        "com.unity.services.core",
         "com.unity.inputsystem"
     };
 
@@ -70,7 +65,7 @@ public static class CodexPackageInstaller
 
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        Log("Required multiplayer packages are installed.");
+        Log("Required editor packages are installed.");
     }
 
     private static void WaitForRequest(Request request)

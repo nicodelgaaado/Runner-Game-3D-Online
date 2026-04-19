@@ -1,21 +1,157 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
-using Unity.Netcode;
-using Unity.Netcode.Transports.UTP;
-using Unity.Services.Authentication;
-using Unity.Services.Core;
-using Unity.Services.Multiplayer;
+using Fusion;
+using Fusion.Sockets;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 
 namespace RunnerGame.Online
 {
-        public class SessionBootstrapper : MonoBehaviour
+    public static class OnlineBuildSceneResolver
+    {
+        public static bool TryResolveSceneRef(string expectedSceneName, string expectedScenePath, out SceneRef sceneRef, out int buildIndex)
         {
-            private const uint NetworkTickRate = 50;
-            private enum BootstrapState
+            if (TryResolveBuildIndex(expectedSceneName, expectedScenePath, out buildIndex))
             {
-            Initializing,
+                sceneRef = SceneRef.FromIndex(buildIndex);
+                return true;
+            }
+
+            sceneRef = default;
+            return false;
+        }
+
+        public static bool TryResolveBuildIndex(string expectedSceneName, string expectedScenePath, out int buildIndex)
+        {
+            int exactPathIndex = SceneUtility.GetBuildIndexByScenePath(expectedScenePath);
+            if (IsBuildIndexValid(exactPathIndex, expectedSceneName, expectedScenePath))
+            {
+                buildIndex = exactPathIndex;
+                return true;
+            }
+
+            for (int index = 0; index < SceneManager.sceneCountInBuildSettings; index++)
+            {
+                if (TryGetBuildScenePath(index, out string scenePath) && PathsMatch(scenePath, expectedScenePath))
+                {
+                    buildIndex = index;
+                    return true;
+                }
+            }
+
+            for (int index = 0; index < SceneManager.sceneCountInBuildSettings; index++)
+            {
+                if (TryGetBuildScenePath(index, out string scenePath) && NamesMatch(scenePath, expectedSceneName, expectedScenePath))
+                {
+                    buildIndex = index;
+                    return true;
+                }
+            }
+
+            buildIndex = -1;
+            return false;
+        }
+
+        public static bool IsBuildIndexValid(int buildIndex, string expectedSceneName, string expectedScenePath)
+        {
+            return TryGetBuildScenePath(buildIndex, out string scenePath)
+                && (PathsMatch(scenePath, expectedScenePath) || NamesMatch(scenePath, expectedSceneName, expectedScenePath));
+        }
+
+        public static string DescribeResolvedBuildIndex(string expectedSceneName, string expectedScenePath)
+        {
+            return TryResolveBuildIndex(expectedSceneName, expectedScenePath, out int buildIndex)
+                ? buildIndex.ToString()
+                : "missing";
+        }
+
+        public static string DescribeBuildScenes()
+        {
+            if (SceneManager.sceneCountInBuildSettings <= 0)
+            {
+                return "none";
+            }
+
+            StringBuilder builder = new StringBuilder();
+            for (int index = 0; index < SceneManager.sceneCountInBuildSettings; index++)
+            {
+                if (index > 0)
+                {
+                    builder.Append(" | ");
+                }
+
+                string scenePath = SceneUtility.GetScenePathByBuildIndex(index);
+                builder.Append(index);
+                builder.Append(':');
+                builder.Append(string.IsNullOrWhiteSpace(scenePath) ? "<empty>" : scenePath);
+            }
+
+            return builder.ToString();
+        }
+
+        public static string GetBuildStamp()
+        {
+            string buildGuid = string.IsNullOrWhiteSpace(Application.buildGUID) ? "unknown" : Application.buildGUID;
+            return $"{Application.version} | {buildGuid}";
+        }
+
+        private static bool TryGetBuildScenePath(int buildIndex, out string scenePath)
+        {
+            if (buildIndex < 0 || buildIndex >= SceneManager.sceneCountInBuildSettings)
+            {
+                scenePath = string.Empty;
+                return false;
+            }
+
+            scenePath = SceneUtility.GetScenePathByBuildIndex(buildIndex);
+            return !string.IsNullOrWhiteSpace(scenePath);
+        }
+
+        private static bool PathsMatch(string actualPath, string expectedPath)
+        {
+            return string.Equals(NormalizePath(actualPath), NormalizePath(expectedPath), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool NamesMatch(string actualPath, string expectedSceneName, string expectedScenePath)
+        {
+            string actualName = Path.GetFileNameWithoutExtension(actualPath);
+            string expectedName = string.IsNullOrWhiteSpace(expectedSceneName)
+                ? Path.GetFileNameWithoutExtension(expectedScenePath)
+                : expectedSceneName;
+
+            return string.Equals(actualName, expectedName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizePath(string path)
+        {
+            return string.IsNullOrWhiteSpace(path)
+                ? string.Empty
+                : path.Replace('\\', '/').Trim();
+        }
+    }
+
+    public class SessionBootstrapper : MonoBehaviour, INetworkRunnerCallbacks
+    {
+        private const int MaxPlayers = 2;
+        private const string GameplaySceneName = "Joc";
+        private const string BootstrapSceneName = "Bootstrap";
+        private const string GameplayScenePath = "Assets/Scenes/Joc.unity";
+        private const string BootstrapScenePath = "Assets/Scenes/Bootstrap.unity";
+        private const string PlayerPrefabResourcePath = "RunnerNetworkPlayer";
+        private const string RaceManagerPrefabResourcePath = "NetworkRaceManager";
+        private const string RunnerObjectName = "FusionRunner";
+        private const string RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        private const int MaxStartAttempts = 3;
+        private const int StartRetryDelayMilliseconds = 1500;
+        private const float GameplayLoadWatchdogTimeoutSeconds = 12f;
+
+        private enum BootstrapState
+        {
             Ready,
             CreatingSession,
             JoiningSession,
@@ -24,18 +160,47 @@ namespace RunnerGame.Online
             Error
         }
 
+        private readonly HashSet<PlayerRef> activePlayers = new();
+
         private string joinCodeInput = string.Empty;
-        private string statusMessage = "Initializing online services...";
-        private BootstrapState state = BootstrapState.Initializing;
-        private bool servicesReady;
+        private string statusMessage = "Ready. Host a match or join with a code.";
+        private BootstrapState state = BootstrapState.Ready;
         private bool sceneLoadRequested;
-        private bool networkStartRequested;
         private bool leavingSession;
+        private bool handlingShutdown;
+        private NetworkRunner runner;
+        private string lastTransportFailureMessage = string.Empty;
+        private float gameplayLoadRequestedAtRealtime = -1f;
+        private string pendingSceneLoadName = string.Empty;
+        private int bootstrapSceneBuildIndex = -1;
+        private SceneRef bootstrapSceneRef;
+        private int gameplaySceneBuildIndex = -1;
+        private SceneRef gameplaySceneRef;
+        private bool raceManagerSpawnPending;
+        private bool localPlayerSpawnPending;
+        private PlayerRef pendingLocalPlayerSpawnRef = PlayerRef.None;
+        private Material bootstrapSkyboxMaterial;
+        private AmbientMode bootstrapAmbientMode;
+        private Color bootstrapAmbientSkyColor;
+        private Color bootstrapAmbientEquatorColor;
+        private Color bootstrapAmbientGroundColor;
+        private float bootstrapAmbientIntensity;
+        private bool bootstrapFogEnabled;
+        private Color bootstrapFogColor;
+        private FogMode bootstrapFogMode;
+        private float bootstrapFogDensity;
+        private float bootstrapLinearFogStart;
+        private float bootstrapLinearFogEnd;
+        private Color bootstrapSubtractiveShadowColor;
+        private OnlineAudioDirector audioDirector;
 
         public static SessionBootstrapper Instance { get; private set; }
-        public ISession CurrentSession { get; private set; }
 
-        private async void Awake()
+        public NetworkRunner Runner => runner;
+        public string CurrentSessionCode => SessionRuntime.SessionCode;
+        public int CurrentPlayerCount => activePlayers.Count;
+
+        private void Awake()
         {
             if (Instance != null && Instance != this)
             {
@@ -46,25 +211,15 @@ namespace RunnerGame.Online
             Instance = this;
             DontDestroyOnLoad(gameObject);
             ConfigureRuntimeForCurrentPlatform();
-            EnsureNetworkManager();
-            NetworkManager.Singleton.OnClientConnectedCallback += HandleClientConnected;
-            NetworkManager.Singleton.OnClientDisconnectCallback += HandleClientDisconnected;
-            NetworkManager.Singleton.OnTransportFailure += HandleTransportFailure;
-            await InitializeServicesAsync();
+            CaptureBootstrapRenderSettings();
+            EnsureAudioDirector().PlayMenuLoop();
         }
 
         private void OnDestroy()
         {
-            if (NetworkManager.Singleton != null)
+            if (runner != null)
             {
-                NetworkManager.Singleton.OnClientConnectedCallback -= HandleClientConnected;
-                NetworkManager.Singleton.OnClientDisconnectCallback -= HandleClientDisconnected;
-                NetworkManager.Singleton.OnTransportFailure -= HandleTransportFailure;
-            }
-
-            if (CurrentSession != null)
-            {
-                UnregisterSessionHandlers(CurrentSession);
+                runner.RemoveCallbacks(this);
             }
 
             if (Instance == this)
@@ -75,94 +230,28 @@ namespace RunnerGame.Online
 
         public async Task CreatePrivateMatchAsync()
         {
-            if (!servicesReady || state == BootstrapState.CreatingSession || state == BootstrapState.JoiningSession)
+            if (!CanStartNewSession())
             {
                 return;
             }
 
+            string roomCode = GenerateRoomCode();
             state = BootstrapState.CreatingSession;
-            statusMessage = "Creating private online match...";
-
-            try
-            {
-                SessionOptions options = new SessionOptions
-                {
-                    MaxPlayers = 2,
-                    IsPrivate = true
-                };
-
-                CurrentSession = await MultiplayerService.Instance.CreateSessionAsync(options);
-                SessionRuntime.SetSession(CurrentSession);
-                RegisterSessionHandlers(CurrentSession);
-
-                state = BootstrapState.WaitingForPlayer;
-                sceneLoadRequested = false;
-                UpdateWaitingStatus();
-            }
-            catch (Exception exception)
-            {
-                SetError($"Failed to create session: {exception.Message}");
-            }
+            statusMessage = $"Creating private room {roomCode}...";
+            await StartSessionAsync(roomCode);
         }
 
         public async Task JoinPrivateMatchAsync(string joinCode)
         {
-            if (!servicesReady || string.IsNullOrWhiteSpace(joinCode))
+            if (!CanStartNewSession() || string.IsNullOrWhiteSpace(joinCode))
             {
                 return;
             }
 
+            string normalizedCode = joinCode.Trim().ToUpperInvariant();
             state = BootstrapState.JoiningSession;
-            statusMessage = "Joining private online match...";
-
-            try
-            {
-                CurrentSession = await MultiplayerService.Instance.JoinSessionByCodeAsync(joinCode.Trim().ToUpperInvariant());
-                SessionRuntime.SetSession(CurrentSession);
-                RegisterSessionHandlers(CurrentSession);
-                sceneLoadRequested = false;
-                state = BootstrapState.WaitingForSceneLoad;
-                UpdateStatusFromNetworkState(CurrentSession.Network.State);
-            }
-            catch (Exception exception)
-            {
-                SetError($"Failed to join session: {exception.Message}");
-            }
-        }
-
-        public async Task StartMatchWhenFullAsync()
-        {
-            if (CurrentSession == null || !CurrentSession.IsHost)
-            {
-                return;
-            }
-
-            if (CurrentSession.Players.Count < 2)
-            {
-                UpdateWaitingStatus();
-                return;
-            }
-
-            if (CurrentSession.Network.State == NetworkState.Stopped && !networkStartRequested)
-            {
-                networkStartRequested = true;
-                state = BootstrapState.WaitingForSceneLoad;
-                statusMessage = "Player 2 joined. Starting Relay connection...";
-
-                try
-                {
-                    await CurrentSession.AsHost().Network.StartRelayNetworkAsync(RelayNetworkOptions.Default);
-                }
-                catch (Exception exception)
-                {
-                    networkStartRequested = false;
-                    SetError($"Failed to start network: {exception.Message}");
-                }
-
-                return;
-            }
-
-            TryStartGameplaySceneOnHost();
+            statusMessage = $"Joining private room {normalizedCode}...";
+            await StartSessionAsync(normalizedCode);
         }
 
         public void LeaveSession()
@@ -172,74 +261,252 @@ namespace RunnerGame.Online
                 return;
             }
 
-            _ = LeaveSessionInternalAsync();
+            EnsureAudioDirector().SetGameplayMusicPaused(false);
+            _ = LeaveSessionInternalAsync(loadBootstrapScene: true, "Returned to menu.");
         }
 
-        private async Task InitializeServicesAsync()
+        private bool CanStartNewSession()
         {
-            if (string.IsNullOrWhiteSpace(Application.cloudProjectId))
+            return !leavingSession && (state == BootstrapState.Ready || state == BootstrapState.Error);
+        }
+
+        private bool IsStartingSession()
+        {
+            return state == BootstrapState.CreatingSession || state == BootstrapState.JoiningSession;
+        }
+
+        private void ResetFailureDetails()
+        {
+            lastTransportFailureMessage = string.Empty;
+        }
+
+        private void RecordTransportFailure(string message, NetworkRunner networkRunner)
+        {
+            if (string.IsNullOrWhiteSpace(message))
             {
-                SetError("Unity project is not linked to a Unity Dashboard project. In the Editor, open Edit > Project Settings > Services, sign in, choose your organization, then link or create a project ID.");
                 return;
             }
 
-            try
-            {
-                await UnityServices.InitializeAsync();
-                if (!AuthenticationService.Instance.IsSignedIn)
-                {
-                    await AuthenticationService.Instance.SignInAnonymouslyAsync();
-                }
+            lastTransportFailureMessage = message;
+            LogSessionSnapshot(message, networkRunner);
+        }
 
-                servicesReady = true;
-                state = BootstrapState.Ready;
-                statusMessage = "Ready. Host a match or join with a code.";
-            }
-            catch (Exception exception)
+        private static string GetBaseExceptionMessage(Exception exception)
+        {
+            return exception?.GetBaseException().Message ?? string.Empty;
+        }
+
+        private bool IsTransientCloudConnectFailure(Exception exception, ShutdownReason? shutdownReason)
+        {
+            if (!string.IsNullOrWhiteSpace(lastTransportFailureMessage))
             {
-                SetError($"Online services failed to initialize: {exception.Message}");
+                return true;
+            }
+
+            string baseMessage = GetBaseExceptionMessage(exception);
+            if (baseMessage.IndexOf("Unable to connect to the remote server", StringComparison.OrdinalIgnoreCase) >= 0
+                || baseMessage.IndexOf("operation was canceled", StringComparison.OrdinalIgnoreCase) >= 0
+                || baseMessage.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0
+                || baseMessage.IndexOf("websocket", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return shutdownReason.HasValue && shutdownReason.Value == ShutdownReason.Error;
+        }
+
+        private string BuildRetryStatusMessage(string sessionCode, int nextAttempt)
+        {
+            string action = state == BootstrapState.JoiningSession ? "Joining" : "Creating";
+            return $"{action} private room {sessionCode}... retrying connection ({nextAttempt}/{MaxStartAttempts})";
+        }
+
+        private string BuildStartFailureMessage(Exception exception, ShutdownReason? shutdownReason)
+        {
+            if (!string.IsNullOrWhiteSpace(lastTransportFailureMessage))
+            {
+                return $"Failed to start Fusion session: {lastTransportFailureMessage}";
+            }
+
+            string baseMessage = GetBaseExceptionMessage(exception);
+            if (baseMessage.IndexOf("Unable to connect to the remote server", StringComparison.OrdinalIgnoreCase) >= 0
+                || baseMessage.IndexOf("operation was canceled", StringComparison.OrdinalIgnoreCase) >= 0
+                || baseMessage.IndexOf("websocket", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Failed to start Fusion session: Photon Cloud websocket connection failed. Check internet, VPN, proxy, firewall, and try again.";
+            }
+
+            if (shutdownReason.HasValue && shutdownReason.Value != ShutdownReason.Ok)
+            {
+                return string.IsNullOrWhiteSpace(baseMessage)
+                    ? $"Failed to start Fusion session: Fusion StartGame failed: {shutdownReason.Value}"
+                    : $"Failed to start Fusion session: Fusion StartGame failed: {shutdownReason.Value} ({baseMessage})";
+            }
+
+            return string.IsNullOrWhiteSpace(baseMessage)
+                ? "Failed to start Fusion session: Unknown startup error."
+                : $"Failed to start Fusion session: {baseMessage}";
+        }
+
+        private async Task StartSessionAsync(string sessionCode)
+        {
+            sceneLoadRequested = false;
+            activePlayers.Clear();
+            ResetGameplaySpawnState();
+            CaptureBootstrapRenderSettings();
+            ResetFailureDetails();
+            ClearGameplayLoadWatchdog();
+
+            if (!TryGetBootstrapSceneRef(out SceneRef bootstrapSceneRef))
+            {
+                return;
+            }
+
+            for (int attempt = 1; attempt <= MaxStartAttempts; attempt++)
+            {
+                ResetFailureDetails();
+
+                try
+                {
+                    runner = CreateRunner();
+                    SessionRuntime.SetSession(runner, sessionCode);
+
+                    var startScene = new NetworkSceneInfo();
+                    startScene.AddSceneRef(bootstrapSceneRef, LoadSceneMode.Single);
+                    StartGameResult startResult = await runner.StartGame(new StartGameArgs
+                    {
+                        GameMode = GameMode.Shared,
+                        SessionName = sessionCode,
+                        PlayerCount = MaxPlayers,
+                        Scene = startScene,
+                        SceneManager = runner.GetComponent<NetworkSceneManagerDefault>(),
+                        ObjectProvider = runner.GetComponent<NetworkObjectProviderDefault>(),
+                    });
+
+                    if (!startResult.Ok)
+                    {
+                        LogSessionSnapshot($"StartSessionAsync: StartGame failed attempt={attempt} shutdown={startResult.ShutdownReason}", runner);
+                        if (attempt < MaxStartAttempts && IsTransientCloudConnectFailure(null, startResult.ShutdownReason))
+                        {
+                            await CleanupRunnerAsync(loadBootstrapScene: false);
+                            statusMessage = BuildRetryStatusMessage(sessionCode, attempt + 1);
+                            await Task.Delay(StartRetryDelayMilliseconds);
+                            continue;
+                        }
+
+                        SetError(BuildStartFailureMessage(null, startResult.ShutdownReason));
+                        await CleanupRunnerAsync(loadBootstrapScene: false);
+                        return;
+                    }
+
+                    LogSessionSnapshot("StartSessionAsync: StartGame completed", runner);
+                    if (DrivesSceneLoad(runner))
+                    {
+                        TryLoadGameplayScene(runner);
+                    }
+
+                    UpdateBootstrapStatus(runner);
+
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    LogSessionSnapshot($"StartSessionAsync: exception attempt={attempt} message={GetBaseExceptionMessage(exception)}", runner);
+                    if (attempt < MaxStartAttempts && IsTransientCloudConnectFailure(exception, null))
+                    {
+                        await CleanupRunnerAsync(loadBootstrapScene: false);
+                        statusMessage = BuildRetryStatusMessage(sessionCode, attempt + 1);
+                        await Task.Delay(StartRetryDelayMilliseconds);
+                        continue;
+                    }
+
+                    SetError(BuildStartFailureMessage(exception, null));
+                    await CleanupRunnerAsync(loadBootstrapScene: false);
+                    return;
+                }
             }
         }
 
-        private void EnsureNetworkManager()
+        private NetworkRunner CreateRunner()
         {
-            GameObject playerPrefab = Resources.Load<GameObject>("RunnerNetworkPlayer");
-            if (playerPrefab == null)
+            GameObject runnerObject = new GameObject(RunnerObjectName);
+            DontDestroyOnLoad(runnerObject);
+
+            NetworkRunner createdRunner = runnerObject.AddComponent<NetworkRunner>();
+            createdRunner.ProvideInput = true;
+
+            runnerObject.AddComponent<NetworkSceneManagerDefault>();
+            runnerObject.AddComponent<NetworkObjectProviderDefault>();
+
+            createdRunner.AddCallbacks(this);
+            return createdRunner;
+        }
+
+        private async Task LeaveSessionInternalAsync(bool loadBootstrapScene, string readyMessage)
+        {
+            leavingSession = true;
+            statusMessage = "Leaving session...";
+
+            try
             {
-                throw new InvalidOperationException("Missing Resources/RunnerNetworkPlayer prefab required for online session startup.");
+                await CleanupRunnerAsync(loadBootstrapScene);
+            }
+            finally
+            {
+                state = BootstrapState.Ready;
+                statusMessage = readyMessage;
+                leavingSession = false;
+                handlingShutdown = false;
+                sceneLoadRequested = false;
+                ResetGameplaySpawnState();
+                ClearGameplayLoadWatchdog();
+                activePlayers.Clear();
+            }
+        }
+
+        private async Task CleanupRunnerAsync(bool loadBootstrapScene)
+        {
+            NetworkRunner currentRunner = runner;
+            if (currentRunner != null)
+            {
+                currentRunner.RemoveCallbacks(this);
+                runner = null;
+
+                if (currentRunner.IsRunning)
+                {
+                    await currentRunner.Shutdown(false, ShutdownReason.Ok, true);
+                }
+
+                if (currentRunner != null)
+                {
+                    Destroy(currentRunner.gameObject);
+                }
             }
 
-            NetworkManager networkManager = NetworkManager.Singleton;
-            if (networkManager == null)
+            SessionRuntime.Clear();
+            ClearGameplayLoadWatchdog();
+            sceneLoadRequested = false;
+            ResetGameplaySpawnState();
+
+            if (loadBootstrapScene && SceneManager.GetActiveScene().name != BootstrapSceneName)
             {
-                GameObject networkManagerObject = new GameObject("NetworkManager");
-                DontDestroyOnLoad(networkManagerObject);
-                networkManager = networkManagerObject.AddComponent<NetworkManager>();
+                SceneManager.LoadScene(BootstrapSceneName, LoadSceneMode.Single);
             }
 
-            UnityTransport transport = networkManager.GetComponent<UnityTransport>();
-            if (transport == null)
+            if (loadBootstrapScene || SceneManager.GetActiveScene().name == BootstrapSceneName)
             {
-                transport = networkManager.gameObject.AddComponent<UnityTransport>();
+                EnsureAudioDirector().PlayMenuLoop();
             }
+        }
 
-            ConfigureTransportForCurrentPlatform(transport);
-
-            if (networkManager.NetworkConfig == null)
-            {
-                networkManager.NetworkConfig = new NetworkConfig();
-            }
-
-            networkManager.NetworkConfig.NetworkTransport = transport;
-            networkManager.NetworkConfig.TickRate = NetworkTickRate;
-            networkManager.NetworkConfig.EnableSceneManagement = true;
-            networkManager.NetworkConfig.PlayerPrefab = playerPrefab;
-            networkManager.NetworkConfig.ForceSamePrefabs = true;
-
-            if (!networkManager.NetworkConfig.Prefabs.Contains(playerPrefab))
-            {
-                networkManager.AddNetworkPrefab(playerPrefab);
-            }
+        private void SetError(string message)
+        {
+            state = BootstrapState.Error;
+            statusMessage = message;
+            sceneLoadRequested = false;
+            ClearGameplayLoadWatchdog();
+            ResetGameplaySpawnState();
+            LogSessionSnapshot($"Error: {message}", runner);
         }
 
         private static void ConfigureRuntimeForCurrentPlatform()
@@ -249,297 +516,676 @@ namespace RunnerGame.Online
 #endif
         }
 
-        private static void ConfigureTransportForCurrentPlatform(UnityTransport transport)
+        private static string GenerateRoomCode()
         {
-#if UNITY_WEBGL && !UNITY_EDITOR
-            transport.UseWebSockets = true;
-#endif
+            char[] buffer = new char[6];
+            byte[] randomBytes = new byte[buffer.Length];
+            RandomNumberGenerator.Fill(randomBytes);
+            for (int index = 0; index < buffer.Length; index++)
+            {
+                buffer[index] = RoomCodeAlphabet[randomBytes[index] % RoomCodeAlphabet.Length];
+            }
+
+            return new string(buffer);
         }
 
-        private void RegisterSessionHandlers(ISession session)
+        private void ResetGameplaySpawnState()
         {
-            session.PlayerJoined += HandlePlayerJoined;
-            session.PlayerLeaving += HandlePlayerLeft;
-            session.Network.StateChanged += HandleNetworkStateChanged;
-            session.Network.StartFailed += HandleNetworkStartFailed;
+            raceManagerSpawnPending = false;
+            localPlayerSpawnPending = false;
+            pendingLocalPlayerSpawnRef = PlayerRef.None;
         }
 
-        private void UnregisterSessionHandlers(ISession session)
+        private void CaptureBootstrapRenderSettings()
         {
-            session.PlayerJoined -= HandlePlayerJoined;
-            session.PlayerLeaving -= HandlePlayerLeft;
-            session.Network.StateChanged -= HandleNetworkStateChanged;
-            session.Network.StartFailed -= HandleNetworkStartFailed;
+            bootstrapSkyboxMaterial = RenderSettings.skybox;
+            bootstrapAmbientMode = RenderSettings.ambientMode;
+            bootstrapAmbientSkyColor = RenderSettings.ambientSkyColor;
+            bootstrapAmbientEquatorColor = RenderSettings.ambientEquatorColor;
+            bootstrapAmbientGroundColor = RenderSettings.ambientGroundColor;
+            bootstrapAmbientIntensity = RenderSettings.ambientIntensity;
+            bootstrapFogEnabled = RenderSettings.fog;
+            bootstrapFogColor = RenderSettings.fogColor;
+            bootstrapFogMode = RenderSettings.fogMode;
+            bootstrapFogDensity = RenderSettings.fogDensity;
+            bootstrapLinearFogStart = RenderSettings.fogStartDistance;
+            bootstrapLinearFogEnd = RenderSettings.fogEndDistance;
+            bootstrapSubtractiveShadowColor = RenderSettings.subtractiveShadowColor;
         }
 
-        private void HandleClientConnected(ulong clientId)
+        private bool TryGetBootstrapSceneRef(out SceneRef sceneRef, bool reportError = true)
         {
-            if (CurrentSession == null || NetworkManager.Singleton == null || leavingSession)
-            {
-                return;
-            }
-
-            if (NetworkManager.Singleton.IsServer)
-            {
-                if (clientId != NetworkManager.Singleton.LocalClientId)
-                {
-                    statusMessage = "Player 2 connected to Relay. Preparing race...";
-                }
-
-                networkStartRequested = true;
-                TryStartGameplaySceneOnHost();
-            }
-            else if (clientId == NetworkManager.Singleton.LocalClientId)
-            {
-                statusMessage = "Connected to host. Waiting for race scene...";
-            }
+            return TryGetSceneRef(
+                ref bootstrapSceneBuildIndex,
+                ref bootstrapSceneRef,
+                BootstrapSceneName,
+                BootstrapScenePath,
+                "Bootstrap",
+                out sceneRef,
+                reportError);
         }
 
-        private async void HandlePlayerJoined(string _)
+        private bool TryGetGameplaySceneRef(out SceneRef sceneRef, bool reportError = true)
         {
-            if (CurrentSession != null && CurrentSession.IsHost)
-            {
-                UpdateWaitingStatus();
-                await StartMatchWhenFullAsync();
-            }
+            return TryGetSceneRef(
+                ref gameplaySceneBuildIndex,
+                ref gameplaySceneRef,
+                GameplaySceneName,
+                GameplayScenePath,
+                "Gameplay",
+                out sceneRef,
+                reportError);
         }
 
-        private void HandlePlayerLeft(string _)
+        private bool TryGetSceneRef(
+            ref int cachedBuildIndex,
+            ref SceneRef cachedSceneRef,
+            string sceneName,
+            string scenePath,
+            string sceneLabel,
+            out SceneRef sceneRef,
+            bool reportError)
         {
-            if (CurrentSession == null)
+            if (cachedSceneRef != default && OnlineBuildSceneResolver.IsBuildIndexValid(cachedBuildIndex, sceneName, scenePath))
             {
-                return;
+                sceneRef = cachedSceneRef;
+                return true;
             }
 
-            networkStartRequested = false;
+            cachedBuildIndex = -1;
+            cachedSceneRef = default;
 
-            if (CurrentSession.IsHost && !sceneLoadRequested)
+            if (OnlineBuildSceneResolver.TryResolveSceneRef(sceneName, scenePath, out sceneRef, out int buildIndex))
             {
-                UpdateWaitingStatus();
-                return;
+                cachedBuildIndex = buildIndex;
+                cachedSceneRef = sceneRef;
+                return true;
             }
 
-            SetError("The other player left the match.");
-            LeaveSession();
+            if (reportError)
+            {
+                LogSceneResolutionFailure(sceneLabel, sceneName, scenePath);
+                SetError($"{sceneLabel} scene is missing from build settings: {scenePath}");
+            }
+
+            return false;
         }
 
-        private void HandleClientDisconnected(ulong clientId)
+        private void LogSceneResolutionFailure(string sceneLabel, string sceneName, string scenePath)
         {
-            NetworkManager networkManager = NetworkManager.Singleton;
-            if (CurrentSession == null || networkManager == null || leavingSession)
-            {
-                return;
-            }
+            string bootstrapBuildIndex = OnlineBuildSceneResolver.DescribeResolvedBuildIndex(BootstrapSceneName, BootstrapScenePath);
+            string gameplayBuildIndex = OnlineBuildSceneResolver.DescribeResolvedBuildIndex(GameplaySceneName, GameplayScenePath);
+            string buildStamp = OnlineBuildSceneResolver.GetBuildStamp();
+            string buildScenes = OnlineBuildSceneResolver.DescribeBuildScenes();
 
-            bool isLocalDisconnect = clientId == networkManager.LocalClientId;
-            bool isHost = networkManager.IsServer;
-
-            if (isHost && !isLocalDisconnect)
-            {
-                sceneLoadRequested = false;
-                networkStartRequested = false;
-
-                if (SceneManager.GetActiveScene().name == "Bootstrap")
-                {
-                    state = BootstrapState.WaitingForPlayer;
-                    UpdateWaitingStatus();
-                    return;
-                }
-            }
-
-            SetError("Disconnected from the online session.");
-            LeaveSession();
+            Debug.LogError(
+                $"[SessionBootstrapper] Failed to resolve {sceneLabel} scene name={sceneName} path={scenePath} buildStamp={buildStamp} bootstrapIndex={bootstrapBuildIndex} gameplayIndex={gameplayBuildIndex} buildScenes=[{buildScenes}]");
         }
 
-        private void HandleTransportFailure()
+        private static bool TryGetLoadedScene(string sceneName, out Scene scene)
         {
-            if (leavingSession)
+            scene = SceneManager.GetSceneByName(sceneName);
+            if (scene.IsValid() && scene.isLoaded)
             {
-                return;
+                return true;
             }
 
-            SetError("Network transport failed. Returning to menu.");
-            LeaveSession();
+            scene = SceneManager.GetActiveScene();
+            return scene.IsValid() && scene.isLoaded && scene.name == sceneName;
         }
 
-        private void HandleNetworkStateChanged(NetworkState networkState)
+        private static bool IsSceneLoadedByUnity(string sceneName)
         {
-            if (CurrentSession == null || leavingSession)
-            {
-                return;
-            }
-
-            UpdateStatusFromNetworkState(networkState);
-
-            if (CurrentSession.IsHost && networkState == NetworkState.Started)
-            {
-                TryStartGameplaySceneOnHost();
-            }
+            return TryGetLoadedScene(sceneName, out _);
         }
 
-        private void HandleNetworkStartFailed(SessionError error)
+        private static bool TryGetRunnerSceneInfo(NetworkRunner networkRunner, out NetworkSceneInfo sceneInfo)
         {
-            networkStartRequested = false;
-            SetError($"Failed to start network: {error}");
+            sceneInfo = default;
+            return HasRunningRunner(networkRunner) && networkRunner.TryGetSceneInfo(out sceneInfo);
         }
 
-        private async Task LeaveSessionInternalAsync()
+        private static bool SceneInfoContains(NetworkSceneInfo sceneInfo, SceneRef sceneRef)
         {
-            leavingSession = true;
-
-            try
-            {
-                if (CurrentSession != null)
-                {
-                    UnregisterSessionHandlers(CurrentSession);
-                    await CurrentSession.LeaveAsync();
-                }
-            }
-            catch (Exception exception)
-            {
-                if (!IsExpectedLeaveException(exception))
-                {
-                    Debug.LogWarning($"Leaving session failed: {exception.Message}");
-                }
-            }
-            finally
-            {
-                CurrentSession = null;
-                sceneLoadRequested = false;
-                networkStartRequested = false;
-                SessionRuntime.Clear();
-                if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
-                {
-                    NetworkManager.Singleton.Shutdown();
-                }
-
-                state = BootstrapState.Ready;
-                statusMessage = "Returned to menu.";
-                if (SceneManager.GetActiveScene().name != "Bootstrap")
-                {
-                    SceneManager.LoadScene("Bootstrap", LoadSceneMode.Single);
-                }
-
-                leavingSession = false;
-            }
-        }
-
-        private void SetError(string message)
-        {
-            state = BootstrapState.Error;
-            statusMessage = message;
-        }
-
-        private void UpdateWaitingStatus()
-        {
-            if (CurrentSession == null)
-            {
-                return;
-            }
-
-            state = BootstrapState.WaitingForPlayer;
-            statusMessage = $"Waiting for player 2... ({CurrentSession.Players.Count}/2)";
-        }
-
-        private void TryStartGameplaySceneOnHost()
-        {
-            NetworkManager networkManager = NetworkManager.Singleton;
-            if (sceneLoadRequested || CurrentSession == null || networkManager == null || !networkManager.IsServer)
-            {
-                return;
-            }
-
-            if (SceneManager.GetActiveScene().name != "Bootstrap")
-            {
-                return;
-            }
-
-            if (CurrentSession.Players.Count < 2)
-            {
-                UpdateWaitingStatus();
-                return;
-            }
-
-            if (CurrentSession.Network.State != NetworkState.Started || !networkManager.IsListening)
-            {
-                state = BootstrapState.WaitingForSceneLoad;
-                statusMessage = "Player 2 joined. Starting network...";
-                return;
-            }
-
-            if (networkManager.ConnectedClientsIds.Count < 2)
-            {
-                state = BootstrapState.WaitingForSceneLoad;
-                statusMessage = "Player 2 joined session. Waiting for network connection...";
-                return;
-            }
-
-            sceneLoadRequested = true;
-            state = BootstrapState.WaitingForSceneLoad;
-            statusMessage = "Both players connected. Loading race scene...";
-            networkManager.SceneManager.LoadScene("Joc", LoadSceneMode.Single);
-        }
-
-        private void UpdateStatusFromNetworkState(NetworkState networkState)
-        {
-            if (CurrentSession == null)
-            {
-                return;
-            }
-
-            switch (networkState)
-            {
-                case NetworkState.Stopped:
-                    if (CurrentSession.IsHost)
-                    {
-                        UpdateWaitingStatus();
-                    }
-                    else
-                    {
-                        state = BootstrapState.WaitingForPlayer;
-                        statusMessage = "Joined session. Waiting for host to start the race...";
-                    }
-                    break;
-                case NetworkState.Starting:
-                    state = BootstrapState.WaitingForSceneLoad;
-                    statusMessage = CurrentSession.IsHost
-                        ? "Starting Relay connection..."
-                        : "Connecting to host...";
-                    break;
-                case NetworkState.Started:
-                    state = BootstrapState.WaitingForSceneLoad;
-                    statusMessage = CurrentSession.IsHost
-                        ? "Relay ready. Waiting for player connection..."
-                        : "Connected. Waiting for host to load the race...";
-                    break;
-                case NetworkState.Stopping:
-                    state = BootstrapState.WaitingForSceneLoad;
-                    statusMessage = "Closing online session...";
-                    break;
-                case NetworkState.Migrating:
-                    state = BootstrapState.WaitingForSceneLoad;
-                    statusMessage = "Network migration in progress...";
-                    break;
-            }
-        }
-
-        private static bool IsExpectedLeaveException(Exception exception)
-        {
-            string message = exception.Message.ToLowerInvariant();
-            return message.Contains("lobby not found")
-                || message.Contains("session was never started")
-                || message.Contains("trying to stop the network when it is not started");
-        }
-
-        private static bool ShouldShowBootstrapGui()
-        {
-            Scene gameplayScene = SceneManager.GetSceneByName("Joc");
-            if (gameplayScene.IsValid() && gameplayScene.isLoaded)
+            if (sceneRef == default)
             {
                 return false;
             }
 
-            return SceneManager.GetActiveScene().name == "Bootstrap";
+            for (int index = 0; index < sceneInfo.SceneCount; index++)
+            {
+                if (sceneInfo.Scenes[index] == sceneRef)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsBootstrapSceneLoadedByFusion(NetworkRunner networkRunner)
+        {
+            return TryGetBootstrapSceneRef(out SceneRef sceneRef, reportError: false)
+                && TryGetRunnerSceneInfo(networkRunner, out NetworkSceneInfo sceneInfo)
+                && SceneInfoContains(sceneInfo, sceneRef);
+        }
+
+        private bool IsGameplaySceneLoadedByFusion(NetworkRunner networkRunner)
+        {
+            return TryGetGameplaySceneRef(out SceneRef sceneRef, reportError: false)
+                && TryGetRunnerSceneInfo(networkRunner, out NetworkSceneInfo sceneInfo)
+                && SceneInfoContains(sceneInfo, sceneRef);
+        }
+
+        private bool IsBootstrapSceneLoaded(NetworkRunner networkRunner)
+        {
+            return IsBootstrapSceneLoadedByFusion(networkRunner);
+        }
+
+        private bool IsGameplaySceneLoaded(NetworkRunner networkRunner)
+        {
+            return IsGameplaySceneLoadedByFusion(networkRunner);
+        }
+
+        private static bool HasRunningRunner(NetworkRunner networkRunner)
+        {
+            return networkRunner != null && networkRunner.IsRunning;
+        }
+
+        private bool DrivesSceneLoad(NetworkRunner networkRunner)
+        {
+            return HasRunningRunner(networkRunner) && (networkRunner.IsSharedModeMasterClient || networkRunner.IsSceneAuthority);
+        }
+
+        private bool HasFullRoom(NetworkRunner networkRunner)
+        {
+            SyncActivePlayersFromRunner(networkRunner);
+            return HasRunningRunner(networkRunner) && activePlayers.Count == MaxPlayers;
+        }
+
+        private bool IsLocalPlayerReady(NetworkRunner networkRunner)
+        {
+            return HasRunningRunner(networkRunner) && networkRunner.IsPlayerValid(networkRunner.LocalPlayer);
+        }
+
+        private void BeginGameplayLoadWatchdog(string sceneName)
+        {
+            gameplayLoadRequestedAtRealtime = Time.realtimeSinceStartup;
+            pendingSceneLoadName = sceneName;
+        }
+
+        private void ClearGameplayLoadWatchdog()
+        {
+            gameplayLoadRequestedAtRealtime = -1f;
+            pendingSceneLoadName = string.Empty;
+        }
+
+        private bool IsGameplayLoadPending()
+        {
+            return gameplayLoadRequestedAtRealtime >= 0f;
+        }
+
+        private bool HasGameplayLoadTimedOut()
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            return gameplayLoadRequestedAtRealtime >= 0f
+                && Time.realtimeSinceStartup - gameplayLoadRequestedAtRealtime >= GameplayLoadWatchdogTimeoutSeconds;
+#else
+            return false;
+#endif
+        }
+
+        private static Light FindDirectionalLightForScene(string sceneName)
+        {
+            if (!TryGetLoadedScene(sceneName, out Scene scene))
+            {
+                return null;
+            }
+
+            foreach (GameObject rootObject in scene.GetRootGameObjects())
+            {
+                if (rootObject == null)
+                {
+                    continue;
+                }
+
+                foreach (Light light in rootObject.GetComponentsInChildren<Light>(true))
+                {
+                    if (light != null && light.type == LightType.Directional)
+                    {
+                        return light;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static string DescribeFusionSceneInfo(NetworkRunner networkRunner)
+        {
+            return TryGetRunnerSceneInfo(networkRunner, out NetworkSceneInfo sceneInfo)
+                ? sceneInfo.ToString()
+                : "invalid";
+        }
+
+        private void RestoreBootstrapRenderSettings(NetworkRunner networkRunner)
+        {
+            if (!IsBootstrapSceneLoaded(networkRunner) || IsGameplaySceneLoaded(networkRunner))
+            {
+                return;
+            }
+
+            RenderSettings.skybox = bootstrapSkyboxMaterial;
+            RenderSettings.ambientMode = bootstrapAmbientMode;
+            RenderSettings.ambientSkyColor = bootstrapAmbientSkyColor;
+            RenderSettings.ambientEquatorColor = bootstrapAmbientEquatorColor;
+            RenderSettings.ambientGroundColor = bootstrapAmbientGroundColor;
+            RenderSettings.ambientIntensity = bootstrapAmbientIntensity;
+            RenderSettings.fog = bootstrapFogEnabled;
+            RenderSettings.fogColor = bootstrapFogColor;
+            RenderSettings.fogMode = bootstrapFogMode;
+            RenderSettings.fogDensity = bootstrapFogDensity;
+            RenderSettings.fogStartDistance = bootstrapLinearFogStart;
+            RenderSettings.fogEndDistance = bootstrapLinearFogEnd;
+            RenderSettings.subtractiveShadowColor = bootstrapSubtractiveShadowColor;
+
+            Light bootstrapDirectionalLight = FindDirectionalLightForScene(BootstrapSceneName);
+            if (bootstrapDirectionalLight != null)
+            {
+                bootstrapDirectionalLight.enabled = true;
+                RenderSettings.sun = bootstrapDirectionalLight;
+            }
+
+            DynamicGI.UpdateEnvironment();
+        }
+
+        private bool HasPendingGameplaySpawns()
+        {
+            return raceManagerSpawnPending || localPlayerSpawnPending;
+        }
+
+        private bool IsGameplayPresentationActive(NetworkRunner networkRunner)
+        {
+            if (!IsGameplaySceneLoaded(networkRunner))
+            {
+                return false;
+            }
+
+            if (!OnlineSceneRuntime.IsGameplaySceneInitialized(networkRunner))
+            {
+                return false;
+            }
+
+            RunnerNetworkPlayer localPlayer = RunnerNetworkPlayer.LocalPlayer;
+            if (NetworkRaceManager.Instance == null || localPlayer == null)
+            {
+                return false;
+            }
+
+            if (!HasRunningRunner(networkRunner) || !networkRunner.IsPlayerValid(networkRunner.LocalPlayer))
+            {
+                return false;
+            }
+
+            return localPlayer.Runner == networkRunner
+                && localPlayer.IsLocalControlled
+                && localPlayer.Object != null
+                && localPlayer.Object.IsValid
+                && localPlayer.HasActiveCameraBinding;
+        }
+
+        private bool ShouldShowBootstrapGui()
+        {
+            return !IsGameplayPresentationActive(runner);
+        }
+
+        private void SyncActivePlayersFromRunner(NetworkRunner networkRunner)
+        {
+            activePlayers.Clear();
+
+            if (networkRunner == null || !networkRunner.IsRunning)
+            {
+                return;
+            }
+
+            foreach (PlayerRef activePlayer in networkRunner.ActivePlayers)
+            {
+                activePlayers.Add(activePlayer);
+            }
+        }
+
+        private void UpdateBootstrapStatus(NetworkRunner networkRunner)
+        {
+            if (IsGameplaySceneLoaded(networkRunner))
+            {
+                if (IsGameplayPresentationActive(networkRunner))
+                {
+                    sceneLoadRequested = false;
+                    ClearGameplayLoadWatchdog();
+                    state = BootstrapState.WaitingForSceneLoad;
+                    statusMessage = "Race scene ready.";
+                }
+                else
+                {
+                    state = BootstrapState.WaitingForSceneLoad;
+                    statusMessage = HasPendingGameplaySpawns()
+                        ? "Gameplay scene loaded. Spawning network objects..."
+                        : DrivesSceneLoad(networkRunner)
+                            ? "Gameplay scene loaded. Finalizing race start..."
+                            : "Gameplay scene loaded. Waiting for race to initialize...";
+                }
+
+                return;
+            }
+
+            SyncActivePlayersFromRunner(networkRunner);
+
+            if (!HasRunningRunner(networkRunner))
+            {
+                state = BootstrapState.Ready;
+                statusMessage = "Ready. Host a match or join with a code.";
+                return;
+            }
+
+            bool fullRoom = HasFullRoom(networkRunner);
+            bool hostDrivesSceneLoad = DrivesSceneLoad(networkRunner);
+            if (sceneLoadRequested && hostDrivesSceneLoad)
+            {
+                state = BootstrapState.WaitingForSceneLoad;
+                statusMessage = "Both players connected. Loading race scene...";
+                return;
+            }
+
+            state = BootstrapState.WaitingForPlayer;
+            if (hostDrivesSceneLoad)
+            {
+                statusMessage = fullRoom
+                    ? "Both players connected. Starting race..."
+                    : $"Waiting for player 2... ({activePlayers.Count}/{MaxPlayers})";
+                return;
+            }
+
+            statusMessage = fullRoom
+                ? "Connected. Waiting for host to start the race..."
+                : $"Connected. Waiting for host to start the race... ({activePlayers.Count}/{MaxPlayers})";
+        }
+
+        private void EnsureGameplayPresentationReady(NetworkRunner networkRunner, string context)
+        {
+            if (!IsGameplaySceneLoaded(networkRunner))
+            {
+                return;
+            }
+
+            LogSessionSnapshot($"{context}: ensuring gameplay presentation", networkRunner);
+
+            try
+            {
+                OnlineSceneRuntime.EnsureGameplaySceneReady(networkRunner);
+                EnsureGameplaySessionObjects(networkRunner);
+            }
+            catch (Exception exception)
+            {
+                SetError($"Failed to initialize gameplay scene: {exception.Message}");
+                return;
+            }
+
+            if (IsGameplayPresentationActive(networkRunner))
+            {
+                sceneLoadRequested = false;
+                ClearGameplayLoadWatchdog();
+                state = BootstrapState.WaitingForSceneLoad;
+                statusMessage = "Race scene ready.";
+                EnsureAudioDirector().PlayGameplayLoop();
+                LogSessionSnapshot($"{context}: gameplay presentation ready", networkRunner);
+                return;
+            }
+
+            state = BootstrapState.WaitingForSceneLoad;
+            statusMessage = HasPendingGameplaySpawns()
+                ? "Gameplay scene loaded. Spawning network objects..."
+                : HasFullRoom(networkRunner)
+                    ? "Gameplay scene loaded. Finalizing race start..."
+                    : "Gameplay scene loaded. Waiting for race to initialize...";
+        }
+
+        private void LogSessionSnapshot(string context, NetworkRunner networkRunner)
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            SyncActivePlayersFromRunner(networkRunner);
+
+            List<string> playerLabels = new List<string>(activePlayers.Count);
+            foreach (PlayerRef activePlayer in activePlayers)
+            {
+                playerLabels.Add(activePlayer.ToString());
+            }
+
+            playerLabels.Sort(StringComparer.Ordinal);
+
+            string playersLabel = playerLabels.Count > 0 ? string.Join(", ", playerLabels) : "none";
+            string localPlayerLabel = networkRunner != null ? networkRunner.LocalPlayer.ToString() : "n/a";
+            string sessionLabel = string.IsNullOrWhiteSpace(SessionRuntime.SessionCode) ? "none" : SessionRuntime.SessionCode;
+            string unitySceneName = SceneManager.GetActiveScene().name;
+            bool isSceneAuthority = networkRunner != null && networkRunner.IsRunning && networkRunner.IsSceneAuthority;
+            bool isMasterClient = networkRunner != null && networkRunner.IsRunning && networkRunner.IsSharedModeMasterClient;
+            bool hostDrivesSceneLoad = DrivesSceneLoad(networkRunner);
+            bool bootstrapLoaded = IsBootstrapSceneLoaded(networkRunner);
+            bool gameplayLoaded = IsGameplaySceneLoaded(networkRunner);
+            bool bootstrapLoadedByFusion = IsBootstrapSceneLoadedByFusion(networkRunner);
+            bool gameplayLoadedByFusion = IsGameplaySceneLoadedByFusion(networkRunner);
+            bool bootstrapLoadedByUnity = IsSceneLoadedByUnity(BootstrapSceneName);
+            bool gameplayLoadedByUnity = IsSceneLoadedByUnity(GameplaySceneName);
+            string bootstrapBuildIndex = OnlineBuildSceneResolver.DescribeResolvedBuildIndex(BootstrapSceneName, BootstrapScenePath);
+            string gameplayBuildIndex = OnlineBuildSceneResolver.DescribeResolvedBuildIndex(GameplaySceneName, GameplayScenePath);
+            string buildStamp = OnlineBuildSceneResolver.GetBuildStamp();
+            bool fullRoom = networkRunner != null && networkRunner.IsRunning && activePlayers.Count == MaxPlayers;
+            bool localPlayerValid = networkRunner != null && networkRunner.IsRunning && networkRunner.IsPlayerValid(networkRunner.LocalPlayer);
+            bool hasActiveRunnerSession = SessionRuntime.Runner != null && SessionRuntime.Runner.IsRunning;
+            string fusionSceneInfo = DescribeFusionSceneInfo(networkRunner);
+
+            Debug.Log(
+                $"[SessionBootstrapper] {context} session={sessionLabel} local={localPlayerLabel} players=[{playersLabel}] unityScene={unitySceneName} fusionSceneInfo={fusionSceneInfo} buildStamp={buildStamp} bootstrapIndex={bootstrapBuildIndex} gameplayIndex={gameplayBuildIndex} bootstrapLoaded={bootstrapLoaded} gameplayLoaded={gameplayLoaded} bootstrapFusion={bootstrapLoadedByFusion} gameplayFusion={gameplayLoadedByFusion} bootstrapUnity={bootstrapLoadedByUnity} gameplayUnity={gameplayLoadedByUnity} sceneAuthority={isSceneAuthority} masterClient={isMasterClient} hostDriver={hostDrivesSceneLoad} fullRoom={fullRoom} localPlayerValid={localPlayerValid} state={state} sceneLoadRequested={sceneLoadRequested} gameplayLoadPending={IsGameplayLoadPending()} pendingSpawns={HasPendingGameplaySpawns()} activeRunnerSession={hasActiveRunnerSession}");
+#endif
+        }
+
+        private void Update()
+        {
+            if (runner == null || !runner.IsRunning || leavingSession)
+            {
+                return;
+            }
+
+            RestoreBootstrapRenderSettings(runner);
+
+            if (HasGameplayLoadTimedOut() && !IsGameplayPresentationActive(runner))
+            {
+                LogSessionSnapshot("Update: gameplay load watchdog timed out", runner);
+                SetError($"Timed out waiting for '{pendingSceneLoadName}' to become ready.");
+                return;
+            }
+
+            if (IsGameplaySceneLoaded(runner))
+            {
+                if (!IsGameplayPresentationActive(runner))
+                {
+                    EnsureGameplayPresentationReady(runner, "Update");
+                }
+                else
+                {
+                    sceneLoadRequested = false;
+                    ClearGameplayLoadWatchdog();
+                }
+
+                return;
+            }
+
+            if (DrivesSceneLoad(runner) && HasFullRoom(runner) && !sceneLoadRequested)
+            {
+                statusMessage = "Both players connected. Starting race...";
+                TryLoadGameplayScene(runner);
+            }
+        }
+
+        private void TryLoadGameplayScene(NetworkRunner networkRunner)
+        {
+            SyncActivePlayersFromRunner(networkRunner);
+            LogSessionSnapshot("TryLoadGameplayScene", networkRunner);
+
+            if (!HasRunningRunner(networkRunner))
+            {
+                return;
+            }
+
+            if (IsGameplaySceneLoaded(networkRunner))
+            {
+                EnsureGameplayPresentationReady(networkRunner, "TryLoadGameplayScene");
+                UpdateBootstrapStatus(networkRunner);
+                return;
+            }
+
+            if (!DrivesSceneLoad(networkRunner))
+            {
+                LogSessionSnapshot("TryLoadGameplayScene: local peer does not drive scene changes", networkRunner);
+                return;
+            }
+
+            if (sceneLoadRequested)
+            {
+                LogSessionSnapshot("TryLoadGameplayScene: gameplay load already pending", networkRunner);
+                return;
+            }
+
+            if (!HasFullRoom(networkRunner))
+            {
+                LogSessionSnapshot("TryLoadGameplayScene: room not full yet", networkRunner);
+                UpdateBootstrapStatus(networkRunner);
+                return;
+            }
+
+            sceneLoadRequested = true;
+            BeginGameplayLoadWatchdog(GameplaySceneName);
+            state = BootstrapState.WaitingForSceneLoad;
+            statusMessage = "Both players connected. Loading race scene...";
+            if (TryGetGameplaySceneRef(out SceneRef gameplaySceneRef))
+            {
+                LogSessionSnapshot("TryLoadGameplayScene: calling runner.LoadScene(Joc)", networkRunner);
+                networkRunner.LoadScene(gameplaySceneRef, LoadSceneMode.Single);
+                return;
+            }
+
+            sceneLoadRequested = false;
+            ClearGameplayLoadWatchdog();
+        }
+
+        private void EnsureGameplaySessionObjects(NetworkRunner networkRunner)
+        {
+            if (DrivesSceneLoad(networkRunner))
+            {
+                NetworkObject raceManagerPrefab = Resources.Load<NetworkObject>(RaceManagerPrefabResourcePath);
+                if (raceManagerPrefab == null)
+                {
+                    throw new InvalidOperationException($"Missing Resources/{RaceManagerPrefabResourcePath}.prefab required for Fusion gameplay startup.");
+                }
+
+                if (NetworkRaceManager.Instance != null)
+                {
+                    raceManagerSpawnPending = false;
+                }
+                else if (!raceManagerSpawnPending)
+                {
+                    raceManagerSpawnPending = true;
+                    LogSessionSnapshot("EnsureGameplaySessionObjects: spawning race manager async", networkRunner);
+                    networkRunner.SpawnAsync(
+                        raceManagerPrefab,
+                        flags: NetworkSpawnFlags.SharedModeStateAuthMasterClient,
+                        onCompleted: result => HandleRaceManagerSpawnCompleted(networkRunner, result));
+                }
+            }
+
+            if (!networkRunner.IsPlayerValid(networkRunner.LocalPlayer))
+            {
+                return;
+            }
+
+            NetworkObject playerPrefab = Resources.Load<NetworkObject>(PlayerPrefabResourcePath);
+            if (playerPrefab == null)
+            {
+                throw new InvalidOperationException($"Missing Resources/{PlayerPrefabResourcePath}.prefab required for Fusion gameplay startup.");
+            }
+
+            if (networkRunner.TryGetPlayerObject(networkRunner.LocalPlayer, out NetworkObject existingObject) && existingObject != null)
+            {
+                localPlayerSpawnPending = false;
+                pendingLocalPlayerSpawnRef = PlayerRef.None;
+                return;
+            }
+
+            if (pendingLocalPlayerSpawnRef != PlayerRef.None && pendingLocalPlayerSpawnRef != networkRunner.LocalPlayer)
+            {
+                localPlayerSpawnPending = false;
+                pendingLocalPlayerSpawnRef = PlayerRef.None;
+            }
+
+            if (localPlayerSpawnPending)
+            {
+                return;
+            }
+
+            pendingLocalPlayerSpawnRef = networkRunner.LocalPlayer;
+            localPlayerSpawnPending = true;
+            LogSessionSnapshot("EnsureGameplaySessionObjects: spawning local player async", networkRunner);
+            networkRunner.SpawnAsync(
+                playerPrefab,
+                position: Vector3.zero,
+                rotation: Quaternion.identity,
+                inputAuthority: networkRunner.LocalPlayer,
+                flags: NetworkSpawnFlags.SharedModeStateAuthLocalPlayer,
+                onCompleted: result => HandleLocalPlayerSpawnCompleted(networkRunner, networkRunner.LocalPlayer, result));
+        }
+
+        private void HandleRaceManagerSpawnCompleted(NetworkRunner sourceRunner, NetworkSpawnOp result)
+        {
+            raceManagerSpawnPending = false;
+
+            if (!HasRunningRunner(sourceRunner) || runner != sourceRunner || leavingSession)
+            {
+                return;
+            }
+
+            LogSessionSnapshot($"HandleRaceManagerSpawnCompleted status={result.Status}", sourceRunner);
+
+            if (!result.IsSpawned || result.Object == null)
+            {
+                SetError($"Failed to spawn NetworkRaceManager: {result.Status}");
+                return;
+            }
+
+            EnsureGameplayPresentationReady(sourceRunner, "HandleRaceManagerSpawnCompleted");
+        }
+
+        private void HandleLocalPlayerSpawnCompleted(NetworkRunner sourceRunner, PlayerRef playerRef, NetworkSpawnOp result)
+        {
+            if (pendingLocalPlayerSpawnRef == playerRef)
+            {
+                pendingLocalPlayerSpawnRef = PlayerRef.None;
+            }
+
+            localPlayerSpawnPending = false;
+
+            if (!HasRunningRunner(sourceRunner) || runner != sourceRunner || leavingSession)
+            {
+                return;
+            }
+
+            LogSessionSnapshot($"HandleLocalPlayerSpawnCompleted status={result.Status} player={playerRef}", sourceRunner);
+
+            if (!result.IsSpawned || result.Object == null)
+            {
+                SetError($"Failed to spawn RunnerNetworkPlayer: {result.Status}");
+                return;
+            }
+
+            EnsureGameplayPresentationReady(sourceRunner, "HandleLocalPlayerSpawnCompleted");
         }
 
         private void OnGUI()
@@ -549,7 +1195,8 @@ namespace RunnerGame.Online
                 return;
             }
 
-            Rect area = new Rect((Screen.width * 0.5f) - 220f, (Screen.height * 0.5f) - 180f, 440f, 360f);
+            float areaHeight = Debug.isDebugBuild ? 720f : 360f;
+            Rect area = new Rect((Screen.width * 0.5f) - 220f, (Screen.height * 0.5f) - (areaHeight * 0.5f), 440f, areaHeight);
             GUILayout.BeginArea(area, GUI.skin.window);
             GUILayout.Label("Runner Game Online");
             GUILayout.Space(8f);
@@ -559,6 +1206,7 @@ namespace RunnerGame.Online
             GUI.enabled = state == BootstrapState.Ready || state == BootstrapState.Error;
             if (GUILayout.Button("Host Private Match"))
             {
+                EnsureAudioDirector().PlayUiSelect();
                 _ = CreatePrivateMatchAsync();
             }
 
@@ -567,19 +1215,174 @@ namespace RunnerGame.Online
             joinCodeInput = GUILayout.TextField(joinCodeInput, 16);
             if (GUILayout.Button("Join Match"))
             {
+                EnsureAudioDirector().PlayUiSelect();
                 _ = JoinPrivateMatchAsync(joinCodeInput);
             }
 
             GUI.enabled = true;
 
-            if (CurrentSession != null)
+            if (SessionRuntime.Runner != null && SessionRuntime.Runner.IsRunning)
             {
                 GUILayout.Space(12f);
-                GUILayout.Label($"Session Code: {CurrentSession.Code}");
-                GUILayout.Label($"Players: {CurrentSession.Players.Count}/2");
+                GUILayout.Label($"Room Code: {SessionRuntime.SessionCode}");
+                GUILayout.Label($"Players: {activePlayers.Count}/{MaxPlayers}");
+                GUILayout.Label($"Mode: Shared");
+            }
+
+            if (Debug.isDebugBuild)
+            {
+                GUILayout.Space(12f);
+                GUILayout.Label("Bootstrap Debug");
+                GUILayout.Label($"Build Stamp: {OnlineBuildSceneResolver.GetBuildStamp()}");
+                GUILayout.Label($"Active Unity Scene: {SceneManager.GetActiveScene().name}");
+                GUILayout.Label($"Fusion Scene Info: {DescribeFusionSceneInfo(runner)}");
+                GUILayout.Label($"Bootstrap Build Index: {OnlineBuildSceneResolver.DescribeResolvedBuildIndex(BootstrapSceneName, BootstrapScenePath)}");
+                GUILayout.Label($"Gameplay Build Index: {OnlineBuildSceneResolver.DescribeResolvedBuildIndex(GameplaySceneName, GameplayScenePath)}");
+                GUILayout.Label($"Bootstrap Loaded (Fusion): {IsBootstrapSceneLoadedByFusion(runner)}");
+                GUILayout.Label($"Bootstrap Loaded (Unity): {IsSceneLoadedByUnity(BootstrapSceneName)}");
+                GUILayout.Label($"Gameplay Loaded (Fusion): {IsGameplaySceneLoadedByFusion(runner)}");
+                GUILayout.Label($"Gameplay Loaded (Unity): {IsSceneLoadedByUnity(GameplaySceneName)}");
+                GUILayout.Label($"Host Drives Scene Load: {DrivesSceneLoad(runner)}");
+                GUILayout.Label($"Scene Authority: {HasRunningRunner(runner) && runner.IsSceneAuthority}");
+                GUILayout.Label($"Master Client: {HasRunningRunner(runner) && runner.IsSharedModeMasterClient}");
+                GUILayout.Label($"Full Room: {HasFullRoom(runner)}");
+                GUILayout.Label($"Local Player Valid: {IsLocalPlayerReady(runner)}");
+                GUILayout.Label($"Scene Load Requested: {sceneLoadRequested}");
+                GUILayout.Label($"Gameplay Load Pending: {IsGameplayLoadPending()}");
+                GUILayout.Label($"Pending Gameplay Spawns: {HasPendingGameplaySpawns()}");
             }
 
             GUILayout.EndArea();
         }
+
+        public void OnPlayerJoined(NetworkRunner networkRunner, PlayerRef player)
+        {
+            SyncActivePlayersFromRunner(networkRunner);
+            LogSessionSnapshot($"OnPlayerJoined player={player}", networkRunner);
+
+            if (DrivesSceneLoad(networkRunner))
+            {
+                TryLoadGameplayScene(networkRunner);
+            }
+
+            UpdateBootstrapStatus(networkRunner);
+        }
+
+        public void OnPlayerLeft(NetworkRunner networkRunner, PlayerRef player)
+        {
+            SyncActivePlayersFromRunner(networkRunner);
+            LogSessionSnapshot($"OnPlayerLeft player={player}", networkRunner);
+
+            if (IsGameplaySceneLoaded(networkRunner) && DrivesSceneLoad(networkRunner))
+            {
+                sceneLoadRequested = false;
+                ClearGameplayLoadWatchdog();
+                statusMessage = "The other player left the match. Returning to menu...";
+                if (TryGetBootstrapSceneRef(out SceneRef bootstrapSceneRef))
+                {
+                    networkRunner.LoadScene(bootstrapSceneRef, LoadSceneMode.Single);
+                }
+                return;
+            }
+
+            UpdateBootstrapStatus(networkRunner);
+        }
+
+        public void OnInput(NetworkRunner networkRunner, NetworkInput input)
+        {
+            input.Set(RunnerInputAdapter.CaptureCurrentDevices());
+        }
+
+        public void OnShutdown(NetworkRunner networkRunner, ShutdownReason shutdownReason)
+        {
+            SessionRuntime.SetShutdownReason(shutdownReason);
+            if (IsStartingSession())
+            {
+                if (shutdownReason != ShutdownReason.Ok)
+                {
+                    RecordTransportFailure($"Fusion shutdown during startup: {shutdownReason}", networkRunner);
+                }
+
+                return;
+            }
+
+            if (handlingShutdown)
+            {
+                return;
+            }
+
+            handlingShutdown = true;
+            _ = LeaveSessionInternalAsync(loadBootstrapScene: true, $"Session closed: {shutdownReason}");
+        }
+
+        public void OnSceneLoadDone(NetworkRunner networkRunner)
+        {
+            string activeSceneName = SceneManager.GetActiveScene().name;
+            LogSessionSnapshot($"OnSceneLoadDone scene={activeSceneName}", networkRunner);
+            if (IsGameplaySceneLoaded(networkRunner))
+            {
+                EnsureGameplayPresentationReady(networkRunner, "OnSceneLoadDone");
+            }
+            else if (IsBootstrapSceneLoaded(networkRunner))
+            {
+                sceneLoadRequested = false;
+                ClearGameplayLoadWatchdog();
+                RestoreBootstrapRenderSettings(networkRunner);
+                EnsureAudioDirector().PlayMenuLoop();
+                UpdateBootstrapStatus(networkRunner);
+            }
+        }
+
+        private OnlineAudioDirector EnsureAudioDirector()
+        {
+            if (audioDirector == null)
+            {
+                audioDirector = GetComponent<OnlineAudioDirector>();
+                if (audioDirector == null)
+                {
+                    audioDirector = gameObject.AddComponent<OnlineAudioDirector>();
+                }
+            }
+
+            return audioDirector;
+        }
+
+        public void OnConnectedToServer(NetworkRunner networkRunner) { }
+        public void OnDisconnectedFromServer(NetworkRunner networkRunner, NetDisconnectReason reason)
+        {
+            string message = $"Disconnected from Photon: {reason}";
+            if (IsStartingSession())
+            {
+                RecordTransportFailure(message, networkRunner);
+                return;
+            }
+
+            SetError(message);
+        }
+        public void OnConnectRequest(NetworkRunner networkRunner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
+        public void OnConnectFailed(NetworkRunner networkRunner, NetAddress remoteAddress, NetConnectFailedReason reason)
+        {
+            string message = $"Failed to connect: {reason}";
+            if (IsStartingSession())
+            {
+                RecordTransportFailure(message, networkRunner);
+                return;
+            }
+
+            SetError(message);
+        }
+        public void OnUserSimulationMessage(NetworkRunner networkRunner, SimulationMessagePtr message) { }
+        public void OnSessionListUpdated(NetworkRunner networkRunner, List<SessionInfo> sessionList) { }
+        public void OnCustomAuthenticationResponse(NetworkRunner networkRunner, Dictionary<string, object> data) { }
+        public void OnHostMigration(NetworkRunner networkRunner, HostMigrationToken hostMigrationToken) { }
+        public void OnReliableDataReceived(NetworkRunner networkRunner, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
+        public void OnReliableDataProgress(NetworkRunner networkRunner, PlayerRef player, ReliableKey key, float progress) { }
+        public void OnInputMissing(NetworkRunner networkRunner, PlayerRef player, NetworkInput input) { }
+        public void OnSceneLoadStart(NetworkRunner networkRunner)
+        {
+            LogSessionSnapshot("OnSceneLoadStart", networkRunner);
+        }
+        public void OnObjectEnterAOI(NetworkRunner networkRunner, NetworkObject obj, PlayerRef player) { }
+        public void OnObjectExitAOI(NetworkRunner networkRunner, NetworkObject obj, PlayerRef player) { }
     }
 }

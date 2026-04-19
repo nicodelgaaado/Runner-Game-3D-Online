@@ -1,5 +1,7 @@
+using Fusion;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 
 namespace RunnerGame.Online
 {
@@ -13,7 +15,20 @@ namespace RunnerGame.Online
             if (keyboard != null && keyboard.escapeKey.wasPressedThisFrame)
             {
                 pauseOverlayVisible = !pauseOverlayVisible;
+                OnlineAudioDirector.Instance?.PlayUiSelect();
+                OnlineAudioDirector.Instance?.SetGameplayMusicPaused(pauseOverlayVisible);
             }
+        }
+
+        private void OnDisable()
+        {
+            if (!pauseOverlayVisible)
+            {
+                return;
+            }
+
+            pauseOverlayVisible = false;
+            OnlineAudioDirector.Instance?.SetGameplayMusicPaused(false);
         }
 
         private void OnGUI()
@@ -24,47 +39,42 @@ namespace RunnerGame.Online
             }
 
             RaceRoundState state = NetworkRaceManager.Instance.RoundState;
-            float hudHeight = Debug.isDebugBuild ? 580f : 160f;
-            GUILayout.BeginArea(new Rect(20f, 20f, 320f, hudHeight), GUI.skin.box);
+            NetworkRunner runner = SessionRuntime.Runner;
+            float hudHeight = Debug.isDebugBuild ? 490f : 160f;
+            GUILayout.BeginArea(new Rect(20f, 20f, 340f, hudHeight), GUI.skin.box);
             GUILayout.Label("Online Race");
             GUILayout.Label($"Level: {state.LevelIndex}");
             GUILayout.Label($"Phase: {state.Phase}");
             GUILayout.Label($"Slot: {RunnerNetworkPlayer.LocalPlayer.SpawnSlot}");
-            if (SessionRuntime.Session != null)
-            {
-                GUILayout.Label($"Join Code: {SessionRuntime.Session.Code}");
-            }
+            GUILayout.Label($"Room Code: {SessionRuntime.SessionCode}");
 
-            if (Debug.isDebugBuild)
+            if (Debug.isDebugBuild && runner != null)
             {
-                GUILayout.Label($"Local Sequence: {RunnerNetworkPlayer.LocalPlayer.LocalInputSequence}");
-                GUILayout.Label($"Received Sequence: {RunnerNetworkPlayer.LocalPlayer.ReceivedInputSequence}");
-                GUILayout.Label($"Processed Sequence: {RunnerNetworkPlayer.LocalPlayer.ProcessedInputSequence}");
-                GUILayout.Label($"Unacked Gap: {RunnerNetworkPlayer.LocalPlayer.UnackedInputGap}");
-                GUILayout.Label($"Pending Inputs: {RunnerNetworkPlayer.LocalPlayer.PendingInputCount}");
-                string replayWindow = RunnerNetworkPlayer.LocalPlayer.ReplayWindowClamped
-                    ? $"{RunnerNetworkPlayer.LocalPlayer.ReplayWindowSize} (Clamped)"
-                    : RunnerNetworkPlayer.LocalPlayer.ReplayWindowSize.ToString();
-                GUILayout.Label($"Replay Window: {replayWindow}");
-                GUILayout.Label($"Replay Pos Err: {RunnerNetworkPlayer.LocalPlayer.ReplayPositionError:F3}");
-                GUILayout.Label($"Replay Path Err: {RunnerNetworkPlayer.LocalPlayer.ReplayPathError:F3}");
-                if (!RunnerNetworkPlayer.LocalPlayer.IsServerRole)
-                {
-                    GUILayout.Label($"Awaiting Snapshot: {RunnerNetworkPlayer.LocalPlayer.AwaitingAuthoritativeSnapshot}");
-                }
+                string sessionName = runner.SessionInfo.IsValid && !string.IsNullOrWhiteSpace(runner.SessionInfo.Name)
+                    ? runner.SessionInfo.Name
+                    : SessionRuntime.SessionCode;
 
+                GUILayout.Label($"Local PlayerRef: {runner.LocalPlayer}");
+                GUILayout.Label($"Owner PlayerRef: {RunnerNetworkPlayer.LocalPlayer.OwnerPlayer}");
+                GUILayout.Label($"Replicated Owner PlayerRef: {RunnerNetworkPlayer.LocalPlayer.ReplicatedOwnerPlayerRef}");
+                GUILayout.Label($"Replicated Slot: {RunnerNetworkPlayer.LocalPlayer.ReplicatedSpawnSlotValue}");
+                GUILayout.Label($"Input Authority PlayerRef: {RunnerNetworkPlayer.LocalPlayer.InputAuthorityPlayer}");
+                GUILayout.Label($"State Authority PlayerRef: {RunnerNetworkPlayer.LocalPlayer.StateAuthorityPlayer}");
+                GUILayout.Label($"Has State Authority: {RunnerNetworkPlayer.LocalPlayer.HasStateAuthority}");
+                GUILayout.Label($"Has Input Authority: {RunnerNetworkPlayer.LocalPlayer.HasInputAuthority}");
+                GUILayout.Label($"Is Scene Authority: {runner.IsSceneAuthority}");
+                GUILayout.Label($"Is Master Client: {runner.IsSharedModeMasterClient}");
+                GUILayout.Label($"Drives Scene Load: {runner.IsSharedModeMasterClient || runner.IsSceneAuthority}");
+                GUILayout.Label($"Runner State: {runner.State}");
+                GUILayout.Label($"Session Name: {sessionName}");
+                GUILayout.Label($"Active Scene: {SceneManager.GetActiveScene().name}");
+                GUILayout.Label($"Fusion Scene Info: {GetFusionSceneInfo(runner)}");
+                GUILayout.Label($"Respawning: {RunnerNetworkPlayer.LocalPlayer.IsRespawning}");
+                GUILayout.Label($"Path State: {RunnerNetworkPlayer.LocalPlayer.ReplicatedPathState:F2}");
                 GUILayout.Label($"Local Y: {RunnerNetworkPlayer.LocalPlayer.LocalPositionY:F3}");
-                string authoritativeY = RunnerNetworkPlayer.LocalPlayer.HasAuthoritativeSnapshot
-                    ? RunnerNetworkPlayer.LocalPlayer.AuthoritativePositionY.ToString("F3")
-                    : "n/a";
-                GUILayout.Label($"Authoritative Y: {authoritativeY}");
                 GUILayout.Label($"Support: {RunnerNetworkPlayer.LocalPlayer.GroundSupportStatus}");
                 GUILayout.Label($"Support Collider: {RunnerNetworkPlayer.LocalPlayer.GroundSupportColliderName}");
                 GUILayout.Label($"Support Normal Y: {RunnerNetworkPlayer.LocalPlayer.GroundSupportNormalY:F3}");
-                GUILayout.Label($"IsOwner: {RunnerNetworkPlayer.LocalPlayer.IsOwnerRole}");
-                GUILayout.Label($"IsServer: {RunnerNetworkPlayer.LocalPlayer.IsServerRole}");
-                GUILayout.Label($"OwnerClientId: {RunnerNetworkPlayer.LocalPlayer.OwnerId}");
-                GUILayout.Label($"ServerClientId: {RunnerNetworkPlayer.LocalPlayer.ServerId}");
             }
 
             GUILayout.EndArea();
@@ -81,15 +91,26 @@ namespace RunnerGame.Online
 
             if (GUILayout.Button("Return To Menu") && SessionBootstrapper.Instance != null)
             {
+                OnlineAudioDirector.Instance?.PlayUiSelect();
+                OnlineAudioDirector.Instance?.SetGameplayMusicPaused(false);
                 SessionBootstrapper.Instance.LeaveSession();
             }
 
             if (GUILayout.Button("Close"))
             {
+                OnlineAudioDirector.Instance?.PlayUiSelect();
                 pauseOverlayVisible = false;
+                OnlineAudioDirector.Instance?.SetGameplayMusicPaused(false);
             }
 
             GUILayout.EndArea();
+        }
+
+        private static string GetFusionSceneInfo(NetworkRunner runner)
+        {
+            return runner != null && runner.TryGetSceneInfo(out NetworkSceneInfo sceneInfo)
+                ? sceneInfo.ToString()
+                : "invalid";
         }
     }
 }
