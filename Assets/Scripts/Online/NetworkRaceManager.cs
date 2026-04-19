@@ -19,6 +19,8 @@ namespace RunnerGame.Online
         private LevelCourseDefinition[] courses;
         private ObstacleManager obstacleManager;
         private RaceRoundState cachedRoundState = RaceRoundState.WaitingForPlayers;
+        private RaceRoundState lastAppliedObstacleRoundState = RaceRoundState.WaitingForPlayers;
+        private bool hasAppliedObstacleRoundState;
 
         public static NetworkRaceManager Instance { get; private set; }
         public RaceRoundState RoundState => Object != null && Object.IsValid ? NetworkRoundState : cachedRoundState;
@@ -37,8 +39,7 @@ namespace RunnerGame.Online
             }
 
             Instance = this;
-            obstacleManager = LegacySceneAdapter.ObstacleManager ?? UnityEngine.Object.FindAnyObjectByType<ObstacleManager>(FindObjectsInactive.Include);
-            cachedRoundState = NetworkRoundState;
+            EnsureObstacleManagerReference();
 
             if (HasStateAuthority)
             {
@@ -46,6 +47,7 @@ namespace RunnerGame.Online
                 PhaseTimer = TickTimer.None;
             }
 
+            cachedRoundState = RoundState;
             ApplyObservedRoundState(RoundState);
         }
 
@@ -55,12 +57,14 @@ namespace RunnerGame.Online
             {
                 Instance = null;
             }
+
+            obstacleManager = null;
+            hasAppliedObstacleRoundState = false;
         }
 
         public override void FixedUpdateNetwork()
         {
             cachedRoundState = RoundState;
-            ApplyObservedRoundState(cachedRoundState);
 
             if (!HasStateAuthority)
             {
@@ -90,6 +94,12 @@ namespace RunnerGame.Online
             {
                 AdvancePhaseTimer();
             }
+        }
+
+        public override void Render()
+        {
+            cachedRoundState = RoundState;
+            ApplyObservedRoundState(cachedRoundState);
         }
 
         public LevelCourseDefinition GetCurrentCourse()
@@ -181,17 +191,48 @@ namespace RunnerGame.Online
         {
             NetworkRoundState = new RaceRoundState(levelIndex, RaceRoundPhase.Racing, Runner.Tick, PlayerRef.None);
             PhaseTimer = TickTimer.None;
-
-            obstacleManager?.ResetForRound(levelIndex);
-            obstacleManager?.SetActiveLevel(levelIndex);
         }
 
         private void ApplyObservedRoundState(RaceRoundState current)
         {
-            if (current.LevelIndex > 0)
+            if (current.LevelIndex <= 0 || !EnsureObstacleManagerReference())
             {
-                obstacleManager?.SetActiveLevel(current.LevelIndex);
+                return;
             }
+
+            if (hasAppliedObstacleRoundState
+                && current.LevelIndex == lastAppliedObstacleRoundState.LevelIndex
+                && current.Phase == lastAppliedObstacleRoundState.Phase
+                && current.RoundStartTick == lastAppliedObstacleRoundState.RoundStartTick)
+            {
+                return;
+            }
+
+            bool enteringNewRacingRound = current.Phase == RaceRoundPhase.Racing
+                && (!hasAppliedObstacleRoundState
+                    || lastAppliedObstacleRoundState.Phase != RaceRoundPhase.Racing
+                    || current.LevelIndex != lastAppliedObstacleRoundState.LevelIndex
+                    || current.RoundStartTick != lastAppliedObstacleRoundState.RoundStartTick);
+
+            if (enteringNewRacingRound)
+            {
+                obstacleManager.ResetForRound(current.LevelIndex);
+            }
+
+            obstacleManager.SetActiveLevel(current.LevelIndex);
+            lastAppliedObstacleRoundState = current;
+            hasAppliedObstacleRoundState = true;
+        }
+
+        private bool EnsureObstacleManagerReference()
+        {
+            if (obstacleManager != null)
+            {
+                return true;
+            }
+
+            obstacleManager = LegacySceneAdapter.ObstacleManager ?? UnityEngine.Object.FindAnyObjectByType<ObstacleManager>(FindObjectsInactive.Include);
+            return obstacleManager != null;
         }
 
         private bool AllPlayersSpawned()
