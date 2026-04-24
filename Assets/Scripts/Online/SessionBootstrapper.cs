@@ -193,6 +193,7 @@ namespace RunnerGame.Online
         private float bootstrapLinearFogEnd;
         private Color bootstrapSubtractiveShadowColor;
         private OnlineAudioDirector audioDirector;
+        private bool showBootstrapDebug;
 
         public static SessionBootstrapper Instance { get; private set; }
 
@@ -990,6 +991,11 @@ namespace RunnerGame.Online
 
         private void Update()
         {
+            if (Debug.isDebugBuild && Input.GetKeyDown(KeyCode.F3))
+            {
+                showBootstrapDebug = !showBootstrapDebug;
+            }
+
             if (runner == null || !runner.IsRunning || leavingSession)
             {
                 return;
@@ -1195,7 +1201,9 @@ namespace RunnerGame.Online
                 return;
             }
 
-            float areaHeight = Debug.isDebugBuild ? 720f : 360f;
+            bool showDebugPanel = Debug.isDebugBuild && showBootstrapDebug;
+            bool showSessionInfo = SessionRuntime.Runner != null && SessionRuntime.Runner.IsRunning;
+            float areaHeight = showDebugPanel ? 560f : showSessionInfo ? 340f : 270f;
             Rect area = new Rect((Screen.width * 0.5f) - 220f, (Screen.height * 0.5f) - (areaHeight * 0.5f), 440f, areaHeight);
             GUILayout.BeginArea(area, GUI.skin.window);
             GUILayout.Label("Runner Game Online");
@@ -1221,7 +1229,7 @@ namespace RunnerGame.Online
 
             GUI.enabled = true;
 
-            if (SessionRuntime.Runner != null && SessionRuntime.Runner.IsRunning)
+            if (showSessionInfo)
             {
                 GUILayout.Space(12f);
                 GUILayout.Label($"Room Code: {SessionRuntime.SessionCode}");
@@ -1229,7 +1237,7 @@ namespace RunnerGame.Online
                 GUILayout.Label($"Mode: Shared");
             }
 
-            if (Debug.isDebugBuild)
+            if (showDebugPanel)
             {
                 GUILayout.Space(12f);
                 GUILayout.Label("Bootstrap Debug");
