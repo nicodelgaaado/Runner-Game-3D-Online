@@ -8,10 +8,16 @@ namespace RunnerGame.Online
     public class LocalMatchHudController : MonoBehaviour
     {
         private bool pauseOverlayVisible;
+        private bool showGameplayDebug;
 
         private void Update()
         {
             Keyboard keyboard = Keyboard.current;
+            if (Debug.isDebugBuild && keyboard != null && keyboard.f3Key.wasPressedThisFrame)
+            {
+                showGameplayDebug = !showGameplayDebug;
+            }
+
             if (keyboard != null && keyboard.escapeKey.wasPressedThisFrame)
             {
                 pauseOverlayVisible = !pauseOverlayVisible;
@@ -40,7 +46,8 @@ namespace RunnerGame.Online
 
             RaceRoundState state = NetworkRaceManager.Instance.RoundState;
             NetworkRunner runner = SessionRuntime.Runner;
-            float hudHeight = Debug.isDebugBuild ? 490f : 160f;
+            bool showDebugPanel = Debug.isDebugBuild && showGameplayDebug && runner != null;
+            float hudHeight = showDebugPanel ? 490f : 160f;
             GUILayout.BeginArea(new Rect(20f, 20f, 340f, hudHeight), GUI.skin.box);
             GUILayout.Label("Online Race");
             GUILayout.Label($"Level: {state.LevelIndex}");
@@ -48,7 +55,7 @@ namespace RunnerGame.Online
             GUILayout.Label($"Slot: {RunnerNetworkPlayer.LocalPlayer.SpawnSlot}");
             GUILayout.Label($"Room Code: {SessionRuntime.SessionCode}");
 
-            if (Debug.isDebugBuild && runner != null)
+            if (showDebugPanel)
             {
                 string sessionName = runner.SessionInfo.IsValid && !string.IsNullOrWhiteSpace(runner.SessionInfo.Name)
                     ? runner.SessionInfo.Name
