@@ -55,7 +55,7 @@ Material:
     m_Floats:
     - _GIntensity: 0
     - _Intensity: 0
-    - _SIntensity: 1
+    - _SIntensity: 0
     - _perturbation: 0.405
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}

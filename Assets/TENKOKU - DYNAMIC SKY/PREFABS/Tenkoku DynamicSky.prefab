@@ -5221,7 +5221,7 @@ Light:
     m_UseCullingMatrixOverride: 0
   m_Cookie: {fileID: 0}
   m_DrawHalo: 0
-  m_Flare: {fileID: 12100000, guid: c9b6ca1a124018848b6e287b04d2e843, type: 2}
+  m_Flare: {fileID: 0}
   m_RenderMode: 1
   m_CullingMask:
     serializedVersion: 2
@@ -10314,9 +10314,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   starReset: 0
   numParticles: 9110
-  baseSize: 2
+  baseSize: 0.02
   setSize: 0.02
-  constellationSize: 1
+  constellationSize: 0.025
   starBrightness: {r: 0.7686275, g: 0.909804, b: 0.9960785, a: 1}
   offset: {x: 0, y: 0, z: 0}
   starData: {fileID: 11400000, guid: 755c3b111b7703245b567c39b0c56d5d, type: 2}
@@ -54844,7 +54844,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   tenkokuVersionNumber: 1.2.2
-  useAutoFX: 1
+  useAutoFX: 0
   systemTime: 34200
   enableAutoAdvance: 1
   mainCamera: {fileID: 0}
@@ -55165,11 +55165,11 @@ MonoBehaviour:
   ambientNightAmt: 1
   colorFog: {r: 0.4655601, g: 0.66247314, b: 0.8014706, a: 0.509}
   moonHorizColor: {r: 1, g: 0.37241378, b: 0, a: 0.854}
-  useSunFlare: 1
-  flareObject: {fileID: 12100000, guid: c9b6ca1a124018848b6e287b04d2e843, type: 2}
-  useSunRays: 1
-  sunRayIntensity: 0.06
-  sunRayLength: 0.2
+  useSunFlare: 0
+  flareObject: {fileID: 0}
+  useSunRays: 0
+  sunRayIntensity: 0
+  sunRayLength: 0
   moonRayIntensity: 1
   useAmbient: 1
   adjustOvercastAmbient: 1
@@ -55212,12 +55212,12 @@ MonoBehaviour:
   auroraLatitude: 60
   auroraIntensity: 0.5
   auroraSpeed: 0.5
-  planetIntensity: 1
+  planetIntensity: 0
   ambientShift: 0
   moonLightIntensity: 0.25
   moonDayIntensity: 0.2
-  starIntensity: 1
-  galaxyIntensity: 0.1
+  starIntensity: 0
+  galaxyIntensity: 0
   horizonHeight: 0.5
   horizonScale: 45
   ambHorizonHeight: 1
@@ -55229,8 +55229,8 @@ MonoBehaviour:
   weatherTypeIndex: 0
   sunTypeIndex: 0
   moonTypeIndex: 0
-  starTypeIndex: 0
-  galaxyTypeIndex: 0
+  starTypeIndex: 2
+  galaxyTypeIndex: 2
   auroraTypeIndex: 0
   galaxyTexIndex: 0
   galaxyTex: {fileID: 2800000, guid: b2601fc8bfd261c4cabb80a8839b8f33, type: 3}

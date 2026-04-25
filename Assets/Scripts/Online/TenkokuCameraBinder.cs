@@ -17,6 +17,9 @@ namespace RunnerGame.Online
         [SerializeField] private float skyboxCloudCoverage = 0.42f;
         [SerializeField] private float skyboxCloudScale = 3.2f;
         [SerializeField] private float skyboxCloudSpeed = 0.018f;
+        [SerializeField] private float starfieldBaseSize = 0.02f;
+        [SerializeField] private float starfieldConstellationSize = 0.025f;
+        [SerializeField] private float starfieldMaxSize = 0.05f;
 
         private Transform currentTarget;
         private SkyRenderState savedState;
@@ -172,6 +175,7 @@ namespace RunnerGame.Online
         {
             ResolveReferences();
             ConfigureTenkokuModule();
+            DisableLegacySkyArtifacts();
             ConfigureSkyboxMaterial();
             ConfigureCloudRenderers();
         }
@@ -190,6 +194,11 @@ namespace RunnerGame.Online
             tenkokuModule.enableProbe = false;
             tenkokuModule.enableSoundFX = false;
             tenkokuModule.useTemporalAliasing = false;
+            tenkokuModule.useSunFlare = false;
+            tenkokuModule.flareObject = null;
+            tenkokuModule.useSunRays = false;
+            tenkokuModule.sunRayIntensity = 0f;
+            tenkokuModule.sunRayLength = 0f;
             tenkokuModule.atmosphereModelTypeIndex = 1;
             tenkokuModule.useAtmosphereIndex = -1;
             tenkokuModule.cameraTypeIndex = 1;
@@ -201,6 +210,11 @@ namespace RunnerGame.Online
             tenkokuModule.currentHour = 10;
             tenkokuModule.currentMinute = 30;
             tenkokuModule.systemTime = 37800f;
+            tenkokuModule.starTypeIndex = 2;
+            tenkokuModule.galaxyTypeIndex = 2;
+            tenkokuModule.starIntensity = 0f;
+            tenkokuModule.galaxyIntensity = 0f;
+            tenkokuModule.planetIntensity = 0f;
             tenkokuModule.weather_cloudAltoStratusAmt = Mathf.Max(tenkokuModule.weather_cloudAltoStratusAmt, 0.3f);
             tenkokuModule.weather_cloudCirrusAmt = Mathf.Max(tenkokuModule.weather_cloudCirrusAmt, 0.55f);
             tenkokuModule.weather_cloudCumulusAmt = Mathf.Max(tenkokuModule.weather_cloudCumulusAmt, 0.55f);
@@ -209,6 +223,72 @@ namespace RunnerGame.Online
             tenkokuModule.weather_WindAmt = Mathf.Max(tenkokuModule.weather_WindAmt, 0.3f);
             tenkokuModule.cloudQuality = Mathf.Max(tenkokuModule.cloudQuality, 0.65f);
             tenkokuModule.cloudBrightness = Mathf.Max(tenkokuModule.cloudBrightness, 1.15f);
+        }
+
+        private void DisableLegacySkyArtifacts()
+        {
+            if (tenkokuLib != null && tenkokuLib.lightObjectWorld != null)
+            {
+                tenkokuLib.lightObjectWorld.flare = null;
+            }
+
+            if (tenkokuLib != null)
+            {
+                DisableRenderer(tenkokuLib.starParticleSystem);
+                DisableRenderer(tenkokuLib.renderObjectGalaxy);
+                DisablePlanet(tenkokuLib.planetObjSaturn, tenkokuLib.planetRendererSaturn);
+                DisablePlanet(tenkokuLib.planetObjJupiter, tenkokuLib.planetRendererJupiter);
+                DisablePlanet(tenkokuLib.planetObjNeptune, tenkokuLib.planetRendererNeptune);
+                DisablePlanet(tenkokuLib.planetObjUranus, tenkokuLib.planetRendererUranus);
+                DisablePlanet(tenkokuLib.planetObjMercury, tenkokuLib.planetRendererMercury);
+                DisablePlanet(tenkokuLib.planetObjVenus, tenkokuLib.planetRendererVenus);
+                DisablePlanet(tenkokuLib.planetObjMars, tenkokuLib.planetRendererMars);
+            }
+
+            foreach (Tenkoku.Effects.TenkokuSunShafts sunShafts in FindObjectsByType<Tenkoku.Effects.TenkokuSunShafts>(FindObjectsInactive.Include))
+            {
+                DisableSunShafts(sunShafts);
+            }
+        }
+
+        private static void DisableSunShafts(Camera camera)
+        {
+            if (camera == null)
+            {
+                return;
+            }
+
+            DisableSunShafts(camera.GetComponent<Tenkoku.Effects.TenkokuSunShafts>());
+        }
+
+        private static void DisableSunShafts(Tenkoku.Effects.TenkokuSunShafts sunShafts)
+        {
+            if (sunShafts != null)
+            {
+                sunShafts.enabled = false;
+            }
+        }
+
+        private static void DisablePlanet(ParticlePlanetHandler planet, Renderer renderer)
+        {
+            if (planet != null)
+            {
+                planet.planetVis = 0f;
+                planet.planetSize = 0f;
+            }
+
+            DisableRenderer(renderer);
+        }
+
+        private static void DisableRenderer(Renderer renderer)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            renderer.enabled = false;
+            renderer.forceRenderingOff = true;
         }
 
         private void ConfigureSkyboxMaterial()
@@ -283,12 +363,14 @@ namespace RunnerGame.Online
                 return;
             }
 
+            DisableSunShafts(renderCamera);
             ResolveReferences();
             if (tenkokuLib == null || tenkokuLib.skyObject == null)
             {
                 return;
             }
 
+            DisableLegacySkyArtifacts();
             SaveSkyState();
 
             float farClip = Mathf.Max(renderCamera.farClipPlane, minimumSkyScale);
@@ -317,7 +399,11 @@ namespace RunnerGame.Online
             if (tenkokuLib.starRenderSystem != null)
             {
                 tenkokuLib.starRenderSystem.starDistance = farClip;
-                tenkokuLib.starRenderSystem.setSize = tenkokuLib.starRenderSystem.baseSize * (farClip / 800f);
+                tenkokuLib.starRenderSystem.baseSize = Mathf.Max(0f, starfieldBaseSize);
+                tenkokuLib.starRenderSystem.constellationSize = Mathf.Max(0f, starfieldConstellationSize);
+                tenkokuLib.starRenderSystem.setSize = Mathf.Min(
+                    Mathf.Max(0f, starfieldMaxSize),
+                    tenkokuLib.starRenderSystem.baseSize * (farClip / 800f));
             }
 
             Shader.SetGlobalVector("_TenkokuCameraPos", renderCamera.transform.position);
