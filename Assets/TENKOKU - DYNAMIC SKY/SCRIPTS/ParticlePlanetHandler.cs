@@ -50,14 +50,14 @@ namespace Tenkoku.Core
 			currPlanetVis = planetVis;
 
 			if (planetRenderer != null){
-				
-				visColor.a = planetVis;
-				
+
 				if (Application.isPlaying){
 					visColor = planetRenderer.material.GetColor("_TintColor");
+					visColor.a = planetVis;
 					planetRenderer.material.SetColor("_TintColor", visColor);
 				} else {
 					visColor = planetRenderer.sharedMaterial.GetColor("_TintColor");
+					visColor.a = planetVis;
 					planetRenderer.sharedMaterial.SetColor("_TintColor", visColor);
 				}
 			}
