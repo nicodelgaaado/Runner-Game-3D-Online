@@ -130,6 +130,15 @@ public class ObstacleManager : MonoBehaviour
     public float speedRoda1;
     public Transform Roda2;
     public float speedRoda2;
+
+    // State for FixedUpdate-driven porta2, porta4, and roda2 rotation
+    // (moved out of coroutines to eliminate phantom collisions).
+    private float porta2Angle;
+    private float porta2PauseTimer;
+    private float porta4Angle;
+    private float porta4PauseTimer;
+    private float roda2Current;
+    private float roda2PauseTimer;
     public Transform d8;
     private float posicioInicialZd8;
     bool fentEsquerrad8;
@@ -252,11 +261,39 @@ public class ObstacleManager : MonoBehaviour
     {
         invulnerable = false;
         activeLevel = 0;
+        DisableDecorativeWheelColliders();
         InitializeHazardGroups();
         InitializeHazardColliders();
         ValidateHazardConfiguration();
         ConfigureAnimatedHazards();
+        ConfigureWheelCollisionDetection();
         RefreshHazardState();
+    }
+
+    private void DisableDecorativeWheelColliders()
+    {
+        DisableDecorativeWheelCollider(Roda1);
+        DisableDecorativeWheelCollider(Roda2);
+    }
+
+    private static void DisableDecorativeWheelCollider(Transform wheelRoot)
+    {
+        if (wheelRoot == null)
+        {
+            return;
+        }
+
+        // Disable ALL colliders in the entire wheel hierarchy.  The
+        // registered arm colliders (e.g. Roda1Objecte1-4, Roda4Objecte1-4)
+        // will be re-enabled by RefreshHazardState() when the level activates.
+        // Previously only the root MeshCollider was disabled, leaving child
+        // MeshColliders (hub, spokes, ring) active — this created a large
+        // invisible collision volume that caused phantom hits on Roda2.
+        Collider[] allColliders = wheelRoot.GetComponentsInChildren<Collider>(true);
+        foreach (Collider col in allColliders)
+        {
+            col.enabled = false;
+        }
     }
 
     // Start is called before the first frame update
@@ -306,10 +343,13 @@ public class ObstacleManager : MonoBehaviour
 
 
         //Nivell 5
-        StartCoroutine(MouPorta2());
+        porta2Angle = 0f;
+        porta2PauseTimer = 0f;
+        porta4Angle = 0f;
+        porta4PauseTimer = 0f;
+        roda2Current = 0f;
+        roda2PauseTimer = 0f;
         RotateHazard(porta31, new Vector3(0f, -90f, 0f), Space.Self);
-        StartCoroutine(MouPorta4());
-        StartCoroutine(MouRoda2());
         posicioInicialZd8 = d8.localPosition.z;
         fentEsquerrad8 = true;
         ranged8 = 10f;
@@ -406,6 +446,64 @@ public class ObstacleManager : MonoBehaviour
             RotateHazard(porta32, new Vector3(0f, speedPorta3 * Time.fixedDeltaTime, 0f), Space.Self);
             RotateHazard(Roda1, new Vector3(0f, 0f, -speedRoda1 * Time.fixedDeltaTime), Space.Self);
             RotateHazard(Girador3, new Vector3(0f, speedGirador3 * Time.fixedDeltaTime, 0f), Space.Self);
+
+            // Porta2 – smooth incremental rotation (was coroutine-based, caused glitching)
+            if (porta2PauseTimer > 0f)
+            {
+                porta2PauseTimer -= Time.fixedDeltaTime;
+            }
+            else
+            {
+                float porta2Step = speedPorta2 * Time.fixedDeltaTime;
+                RotateHazard(porta21, new Vector3(0f, -porta2Step, 0f), Space.Self);
+                RotateHazard(porta22, new Vector3(0f, porta2Step, 0f), Space.Self);
+                porta2Angle += porta2Step;
+                if (porta2Angle >= 180f)
+                {
+                    porta2Angle = 0f;
+                    porta2PauseTimer = 1f;
+                    // Reset to starting local rotation after a full half-turn
+                    SetHazardLocalRotation(porta21, Quaternion.identity);
+                    SetHazardLocalRotation(porta22, Quaternion.identity);
+                }
+            }
+
+            // Porta4 – smooth incremental rotation (was coroutine-based, caused glitching)
+            if (porta4PauseTimer > 0f)
+            {
+                porta4PauseTimer -= Time.fixedDeltaTime;
+            }
+            else
+            {
+                float porta4Step = speedPorta4 * Time.fixedDeltaTime;
+                RotateHazard(porta41, new Vector3(-porta4Step, 0f, 0f), Space.Self);
+                RotateHazard(porta42, new Vector3(-porta4Step, 0f, 0f), Space.Self);
+                porta4Angle += porta4Step;
+                if (porta4Angle >= 180f)
+                {
+                    porta4Angle = 0f;
+                    porta4PauseTimer = 1f;
+                    SetHazardLocalRotation(porta41, Quaternion.identity);
+                    SetHazardLocalRotation(porta42, Quaternion.Euler(-90f, 0f, 0f));
+                }
+            }
+
+            // Roda2 – smooth incremental rotation (was coroutine-based, caused phantom hits)
+            if (roda2PauseTimer > 0f)
+            {
+                roda2PauseTimer -= Time.fixedDeltaTime;
+            }
+            else
+            {
+                float roda2Step = speedRoda2 * Time.fixedDeltaTime;
+                RotateHazard(Roda2, new Vector3(0f, 0f, roda2Step), Space.Self);
+                roda2Current += roda2Step;
+                if (roda2Current >= 45f)
+                {
+                    roda2Current = 0f;
+                    roda2PauseTimer = 1f;
+                }
+            }
         }
     }
 
@@ -417,6 +515,29 @@ public class ObstacleManager : MonoBehaviour
             {
                 ConfigureKinematicRigidbody(hazardRoot);
             }
+        }
+    }
+
+    private void ConfigureWheelCollisionDetection()
+    {
+        // Downgrade all rotating level-5 hazards to Discrete collision detection.
+        // ContinuousSpeculative on kinematic rotating bodies with MeshColliders
+        // generates phantom swept-volume collisions (the root cause of Roda2
+        // hitting players at a distance and Porta2 glitching).
+        SetHazardCollisionDetection(Roda1, CollisionDetectionMode.Discrete);
+        SetHazardCollisionDetection(Roda2, CollisionDetectionMode.Discrete);
+        SetHazardCollisionDetection(porta21, CollisionDetectionMode.Discrete);
+        SetHazardCollisionDetection(porta22, CollisionDetectionMode.Discrete);
+        SetHazardCollisionDetection(porta41, CollisionDetectionMode.Discrete);
+        SetHazardCollisionDetection(porta42, CollisionDetectionMode.Discrete);
+    }
+
+    private void SetHazardCollisionDetection(Transform hazardRoot, CollisionDetectionMode mode)
+    {
+        Rigidbody hazardRigidbody = GetHazardRigidbody(hazardRoot);
+        if (hazardRigidbody != null)
+        {
+            hazardRigidbody.collisionDetectionMode = mode;
         }
     }
 
@@ -634,7 +755,9 @@ public class ObstacleManager : MonoBehaviour
     public bool TryGetOnlineHazardResponse(Collider hazardCollider, out OnlineHazardResponseKind responseKind)
     {
         responseKind = OnlineHazardResponseKind.None;
-        return hazardCollider != null && onlineHazardResponses.TryGetValue(hazardCollider, out responseKind);
+        return hazardCollider != null
+            && hazardCollider.enabled
+            && onlineHazardResponses.TryGetValue(hazardCollider, out responseKind);
     }
 
     public void SetActiveLevel(int level)
@@ -1027,90 +1150,13 @@ public class ObstacleManager : MonoBehaviour
     }
 
 
-    private IEnumerator MouPorta2()
-    {
-        float angle = 0f; 
-        while (true)
-        {
-            if (!IsLevelActive(5))
-            {
-                yield return waitForFixedUpdate;
-                continue;
-            }
-
-            angle += -speedPorta2 * Time.fixedDeltaTime;
-             
-            if (angle < -180f)
-            {
-                angle = 0f;
-                yield return new WaitForSeconds(1f);
-            }
-            else
-            {
-                SetHazardLocalRotation(porta21, Quaternion.Euler(0f, angle, 0f));
-                SetHazardLocalRotation(porta22, Quaternion.Euler(0f, -angle, 0f));
-                yield return waitForFixedUpdate;
-            }
-        }
-
-    }
-
-    private IEnumerator MouPorta4()
-    {
-        float angle = 0f;
-        while (true)
-        {
-            if (!IsLevelActive(5))
-            {
-                yield return waitForFixedUpdate;
-                continue;
-            }
-
-            angle += -speedPorta4 * Time.fixedDeltaTime;
-
-            if (angle < -180f)
-            {
-                angle = 0f;
-                yield return new WaitForSeconds(1f);
-            }
-            else
-            {
-                SetHazardLocalRotation(porta41, Quaternion.Euler(-angle, 0f, 0f));
-                SetHazardLocalRotation(porta42, Quaternion.Euler(-angle - 90f, 0f, 0f));
-                yield return waitForFixedUpdate;
-            }
-        }
-
-    }
-
-    private IEnumerator MouRoda2()
-    {
-        float current = 0f;
-        float angle = 0f; 
-        while (true)
-        {
-            if (!IsLevelActive(5))
-            {
-                yield return waitForFixedUpdate;
-                continue;
-            }
-
-            angle += speedRoda2 * Time.fixedDeltaTime;
-            current += speedRoda2 * Time.fixedDeltaTime; 
-
-            if (current > 45f)
-            {
-                current = 0f;
-                yield return new WaitForSeconds(1f);
-            }
-            else
-            {
-                SetHazardLocalRotation(Roda2, Quaternion.Euler(90f, 0f, angle));
-                yield return waitForFixedUpdate;
-            }
-        }
-        
-    }
+    // MouPorta2, MouPorta4, and MouRoda2 coroutines have been removed.
+    // Their rotation is now handled by smooth incremental RotateHazard calls
+    // in FixedUpdate, matching the proven pattern used by Roda1/Porta1/Porta3.
+    // The coroutine-based SetHazardLocalRotation approach caused:
+    //   - Phantom collisions on Roda2 (swept-volume hits from MeshColliders
+    //     combined with ContinuousSpeculative on the kinematic Rigidbody)
+    //   - Glitching on Porta2 (180° rotation reset teleported the physics body)
 
     private IEnumerator Moud8()
     {
