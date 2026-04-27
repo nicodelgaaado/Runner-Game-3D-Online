@@ -462,9 +462,9 @@ public class ObstacleManager : MonoBehaviour
                 {
                     porta2Angle = 0f;
                     porta2PauseTimer = 1f;
-                    // Reset to starting local rotation after a full half-turn
-                    SetHazardLocalRotation(porta21, Quaternion.identity);
-                    SetHazardLocalRotation(porta22, Quaternion.identity);
+                    // Snap (not interpolate) to starting rotation after a full half-turn
+                    SnapHazardLocalRotation(porta21, Quaternion.identity);
+                    SnapHazardLocalRotation(porta22, Quaternion.identity);
                 }
             }
 
@@ -483,8 +483,9 @@ public class ObstacleManager : MonoBehaviour
                 {
                     porta4Angle = 0f;
                     porta4PauseTimer = 1f;
-                    SetHazardLocalRotation(porta41, Quaternion.identity);
-                    SetHazardLocalRotation(porta42, Quaternion.Euler(-90f, 0f, 0f));
+                    // Snap (not interpolate) to starting rotation after a full half-turn
+                    SnapHazardLocalRotation(porta41, Quaternion.identity);
+                    SnapHazardLocalRotation(porta42, Quaternion.Euler(-90f, 0f, 0f));
                 }
             }
 
@@ -906,6 +907,33 @@ public class ObstacleManager : MonoBehaviour
             : localRotation;
 
         MoveHazardRotation(hazardRoot, worldRotation);
+    }
+
+    /// <summary>
+    /// Instantly set the local rotation of a hazard WITHOUT interpolation.
+    /// Used when snapping rotation back to a start orientation (e.g. after a
+    /// full 180° cycle on porta2/porta4).  Bypasses Rigidbody.MoveRotation
+    /// so Unity's Interpolate mode does not blend between the old (~180°)
+    /// and new (0°) orientations, which was the root cause of the visual
+    /// flickering on these obstacles.
+    /// </summary>
+    private void SnapHazardLocalRotation(Transform hazardRoot, Quaternion localRotation)
+    {
+        Quaternion worldRotation = hazardRoot.parent != null
+            ? hazardRoot.parent.rotation * localRotation
+            : localRotation;
+
+        // Write directly to the transform — this bypasses interpolation.
+        hazardRoot.rotation = worldRotation;
+
+        // Re-sync the Rigidbody so its internal previous-frame state matches
+        // the new transform, preventing any interpolation ghost frame.
+        Rigidbody rb = GetHazardRigidbody(hazardRoot);
+        if (rb != null)
+        {
+            rb.position = hazardRoot.position;
+            rb.rotation = worldRotation;
+        }
     }
 
     private IEnumerator MouGrupPunxes1()
