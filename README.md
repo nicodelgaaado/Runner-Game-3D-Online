@@ -75,3 +75,9 @@ Para publicar en Unity Play, se recomienda usar el build `Web-Release` y ejecuta
 - El host usa el jugador azul y el invitado usa el jugador rojo.
 - El flujo online está diseñado para partidas privadas de máximo 2 jugadores.
 - Para pruebas locales con varias instancias, revisar la configuración de Photon Fusion Multi-Peer.
+
+## Autores 
+
+- Nicolas Delgado 
+- Oskar Ortiz 
+- Diery Valencia 
