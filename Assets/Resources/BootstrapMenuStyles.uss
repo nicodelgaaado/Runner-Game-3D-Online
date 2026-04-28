@@ -1,0 +1,29 @@
+#join-code-field {
+    --unity-cursor-color: rgb(255, 255, 255);
+    --unity-selection-color: rgba(120, 184, 255, 115);
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+}
+
+#join-code-field .unity-base-field__input,
+#join-code-field .unity-base-text-field__input {
+    height: 48px;
+    min-height: 48px;
+    padding-top: 0;
+    padding-bottom: 0;
+    align-items: center;
+    justify-content: center;
+    --unity-cursor-color: rgb(255, 255, 255);
+    --unity-selection-color: rgba(120, 184, 255, 115);
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+}
+
+#join-code-field #unity-text-input,
+#join-code-field TextInput,
+#join-code-field TextElement {
+    --unity-cursor-color: rgb(255, 255, 255);
+    --unity-selection-color: rgba(120, 184, 255, 115);
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+}
