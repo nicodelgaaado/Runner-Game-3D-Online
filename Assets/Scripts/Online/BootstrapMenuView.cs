@@ -7,6 +7,10 @@ namespace RunnerGame.Online
     public class BootstrapMenuView : MonoBehaviour
     {
         private const int JoinCodeMaxLength = 16;
+        private const float JoinCodeFieldHeight = 48f;
+        private const float JoinCodeFontSize = 18f;
+        private const float JoinCodeLineHeight = 22f;
+        private const float JoinCodeVerticalPadding = 4f;
 
         private SessionBootstrapper bootstrapper;
         private UIDocument document;
@@ -151,17 +155,17 @@ namespace RunnerGame.Online
             joinCodeField.focusable = true;
             joinCodeField.pickingMode = PickingMode.Position;
             joinCodeField.maxLength = JoinCodeMaxLength;
-            joinCodeField.style.height = 48f;
+            joinCodeField.style.height = JoinCodeFieldHeight;
             joinCodeField.style.marginBottom = 10f;
             joinCodeField.style.paddingLeft = 12f;
             joinCodeField.style.paddingRight = 12f;
-            joinCodeField.style.paddingTop = 0f;
+            joinCodeField.style.paddingTop = JoinCodeVerticalPadding;
             joinCodeField.style.paddingBottom = 0f;
             joinCodeField.style.alignSelf = Align.Stretch;
             joinCodeField.style.flexShrink = 0f;
             joinCodeField.style.backgroundColor = new Color(0.08f, 0.105f, 0.14f, 0.98f);
             joinCodeField.style.color = Color.white;
-            joinCodeField.style.fontSize = 18f;
+            joinCodeField.style.fontSize = JoinCodeFontSize;
             joinCodeField.style.unityTextAlign = TextAnchor.MiddleLeft;
             joinCodeField.style.borderTopLeftRadius = 6f;
             joinCodeField.style.borderTopRightRadius = 6f;
@@ -348,6 +352,8 @@ namespace RunnerGame.Online
                 ApplyFont(element);
                 element.style.flexGrow = 1f;
                 element.style.flexShrink = 1f;
+                element.style.alignItems = Align.Center;
+                element.style.justifyContent = Justify.Center;
                 element.style.marginLeft = 0f;
                 element.style.marginRight = 0f;
                 element.style.marginTop = 0f;
@@ -362,7 +368,7 @@ namespace RunnerGame.Online
                 element.style.borderTopWidth = 0f;
                 element.style.borderBottomWidth = 0f;
                 element.style.color = Color.white;
-                element.style.fontSize = 18f;
+                element.style.fontSize = JoinCodeFontSize;
                 element.style.unityTextAlign = TextAnchor.MiddleLeft;
                 element.style.whiteSpace = WhiteSpace.NoWrap;
             });
@@ -371,7 +377,12 @@ namespace RunnerGame.Online
             {
                 ApplyFont(text);
                 text.style.color = Color.white;
-                text.style.fontSize = 18f;
+                text.style.fontSize = JoinCodeFontSize;
+                text.style.height = JoinCodeLineHeight;
+                text.style.marginLeft = 0f;
+                text.style.marginRight = 0f;
+                text.style.marginTop = 0f;
+                text.style.marginBottom = 0f;
                 text.style.unityTextAlign = TextAnchor.MiddleLeft;
                 text.style.whiteSpace = WhiteSpace.NoWrap;
             });
