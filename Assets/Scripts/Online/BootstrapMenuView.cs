@@ -10,7 +10,6 @@ namespace RunnerGame.Online
         private const string BootstrapMenuStyleSheetResource = "BootstrapMenuStyles";
         private const float JoinCodeFieldHeight = 48f;
         private const float JoinCodeFontSize = 18f;
-        private const float JoinCodeLineHeight = 22f;
         private const float JoinCodeVerticalPadding = 0f;
 
         private SessionBootstrapper bootstrapper;
@@ -392,8 +391,10 @@ namespace RunnerGame.Online
                 }
 
                 ApplyFont(element);
-                element.style.flexGrow = 1f;
-                element.style.flexShrink = 1f;
+                element.style.height = JoinCodeFieldHeight;
+                element.style.minHeight = JoinCodeFieldHeight;
+                element.style.flexGrow = 0f;
+                element.style.flexShrink = 0f;
                 element.style.alignItems = Align.Center;
                 element.style.justifyContent = Justify.Center;
                 element.style.marginLeft = 0f;
@@ -418,12 +419,14 @@ namespace RunnerGame.Online
             field.Query<TextElement>().ForEach(text =>
             {
                 ApplyFont(text);
-                text.style.flexGrow = 1f;
+                text.style.height = JoinCodeFieldHeight;
+                text.style.minHeight = JoinCodeFieldHeight;
+                text.style.flexGrow = 0f;
+                text.style.flexShrink = 0f;
                 text.style.alignSelf = Align.Stretch;
                 text.style.width = Length.Percent(100f);
                 text.style.color = Color.white;
                 text.style.fontSize = JoinCodeFontSize;
-                text.style.height = JoinCodeLineHeight;
                 text.style.marginLeft = 0f;
                 text.style.marginRight = 0f;
                 text.style.marginTop = 0f;
