@@ -147,13 +147,19 @@ namespace RunnerGame.Online
             panel.Add(joinLabel);
 
             joinCodeField = new TextField { name = "join-code-field", isDelayed = false };
+            joinCodeField.maxLength = JoinCodeMaxLength;
             joinCodeField.style.height = 48f;
             joinCodeField.style.marginBottom = 10f;
-            joinCodeField.style.paddingLeft = 12f;
-            joinCodeField.style.paddingRight = 12f;
+            joinCodeField.style.paddingLeft = 0f;
+            joinCodeField.style.paddingRight = 0f;
+            joinCodeField.style.paddingTop = 0f;
+            joinCodeField.style.paddingBottom = 0f;
+            joinCodeField.style.alignSelf = Align.Stretch;
+            joinCodeField.style.flexShrink = 0f;
             joinCodeField.style.backgroundColor = new Color(0.08f, 0.105f, 0.14f, 0.98f);
             joinCodeField.style.color = Color.white;
             joinCodeField.style.fontSize = 18f;
+            joinCodeField.style.unityTextAlign = TextAnchor.MiddleLeft;
             joinCodeField.style.borderTopLeftRadius = 6f;
             joinCodeField.style.borderTopRightRadius = 6f;
             joinCodeField.style.borderBottomLeftRadius = 6f;
@@ -264,14 +270,7 @@ namespace RunnerGame.Online
 
         private static Font LoadMenuFont()
         {
-            Font font = Resources.GetBuiltinResource<Font>("Fonts/Inter-Regular.ttf");
-            if (font != null)
-            {
-                return font;
-            }
-
-            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            return font != null ? font : Font.CreateDynamicFontFromOSFont("Arial", 16);
+            return Font.CreateDynamicFontFromOSFont(new[] { "Inter", "Segoe UI", "Arial" }, 16);
         }
 
         private void ApplyFont(VisualElement element)
@@ -318,12 +317,59 @@ namespace RunnerGame.Online
 
         private void ApplyTextFieldTextStyleNow(TextField field)
         {
+            Color transparent = new Color(0f, 0f, 0f, 0f);
+
+            field.Query<VisualElement>().ForEach(element =>
+            {
+                bool isInputContainer = element.ClassListContains("unity-base-field__input")
+                    || element.ClassListContains("unity-base-text-field__input")
+                    || element.ClassListContains("unity-text-input");
+                if (!isInputContainer)
+                {
+                    return;
+                }
+
+                ApplyFont(element);
+                element.style.flexGrow = 1f;
+                element.style.flexShrink = 1f;
+                element.style.width = Length.Percent(100f);
+                element.style.minWidth = 0f;
+                element.style.height = Length.Percent(100f);
+                element.style.marginLeft = 0f;
+                element.style.marginRight = 0f;
+                element.style.marginTop = 0f;
+                element.style.marginBottom = 0f;
+                element.style.paddingLeft = 12f;
+                element.style.paddingRight = 12f;
+                element.style.paddingTop = 0f;
+                element.style.paddingBottom = 0f;
+                element.style.backgroundColor = transparent;
+                element.style.borderLeftWidth = 0f;
+                element.style.borderRightWidth = 0f;
+                element.style.borderTopWidth = 0f;
+                element.style.borderBottomWidth = 0f;
+                element.style.color = Color.white;
+                element.style.fontSize = 18f;
+                element.style.unityTextAlign = TextAnchor.MiddleLeft;
+                element.style.whiteSpace = WhiteSpace.NoWrap;
+            });
+
             field.Query<TextElement>().ForEach(text =>
             {
                 ApplyFont(text);
                 text.style.color = Color.white;
                 text.style.fontSize = 18f;
                 text.style.unityTextAlign = TextAnchor.MiddleLeft;
+                text.style.whiteSpace = WhiteSpace.NoWrap;
+                text.style.flexGrow = 1f;
+                text.style.flexShrink = 1f;
+                text.style.width = Length.Percent(100f);
+                text.style.minWidth = 0f;
+                text.style.height = Length.Percent(100f);
+                text.style.marginLeft = 0f;
+                text.style.marginRight = 0f;
+                text.style.marginTop = 0f;
+                text.style.marginBottom = 0f;
             });
         }
 
