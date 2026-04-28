@@ -195,6 +195,9 @@ namespace RunnerGame.Online
         private bool showBootstrapDebug;
         private BootstrapMenuView bootstrapMenuView;
 
+        [SerializeField]
+        private Font bootstrapMenuFont = null;
+
         public static SessionBootstrapper Instance { get; private set; }
 
         public NetworkRunner Runner => runner;
@@ -967,7 +970,7 @@ namespace RunnerGame.Online
                 bootstrapMenuView = menuObject.AddComponent<BootstrapMenuView>();
             }
 
-            bootstrapMenuView.Initialize(this);
+            bootstrapMenuView.Initialize(this, bootstrapMenuFont);
         }
 
         private void RefreshBootstrapMenu()

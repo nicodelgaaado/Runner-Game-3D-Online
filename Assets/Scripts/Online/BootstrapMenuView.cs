@@ -26,11 +26,11 @@ namespace RunnerGame.Online
         private Button joinButton;
         private Button leaveButton;
 
-        public void Initialize(SessionBootstrapper owner)
+        public void Initialize(SessionBootstrapper owner, Font fontAsset)
         {
             bootstrapper = owner;
             EnsureDocument();
-            BuildInterface();
+            BuildInterface(fontAsset);
         }
 
         public void Refresh(SessionBootstrapper.BootstrapMenuSnapshot snapshot)
@@ -83,9 +83,9 @@ namespace RunnerGame.Online
             document.sortingOrder = 100;
         }
 
-        private void BuildInterface()
+        private void BuildInterface(Font fontAsset)
         {
-            menuFont = LoadMenuFont();
+            menuFont = LoadMenuFont(fontAsset);
             root = document.rootVisualElement;
             root.Clear();
             root.name = "bootstrap-menu-root";
@@ -268,9 +268,15 @@ namespace RunnerGame.Online
             return button;
         }
 
-        private static Font LoadMenuFont()
+        private static Font LoadMenuFont(Font fontAsset)
         {
-            return Font.CreateDynamicFontFromOSFont(new[] { "Inter", "Segoe UI", "Arial" }, 16);
+            if (fontAsset != null)
+            {
+                return fontAsset;
+            }
+
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            return font != null ? font : Resources.GetBuiltinResource<Font>("Arial.ttf");
         }
 
         private void ApplyFont(VisualElement element)
