@@ -6,11 +6,10 @@ namespace RunnerGame.Online
     [RequireComponent(typeof(UIDocument))]
     public class BootstrapMenuView : MonoBehaviour
     {
-        private const int JoinCodeMaxLength = 16;
         private const float JoinCodeFieldHeight = 48f;
         private const float JoinCodeFontSize = 18f;
         private const float JoinCodeLineHeight = 22f;
-        private const float JoinCodeVerticalPadding = 4f;
+        private const float JoinCodeVerticalPadding = 0f;
 
         private SessionBootstrapper bootstrapper;
         private UIDocument document;
@@ -154,7 +153,7 @@ namespace RunnerGame.Online
             joinCodeField = new TextField { name = "join-code-field", isDelayed = false };
             joinCodeField.focusable = true;
             joinCodeField.pickingMode = PickingMode.Position;
-            joinCodeField.maxLength = JoinCodeMaxLength;
+            joinCodeField.maxLength = SessionBootstrapper.RoomCodeLength;
             joinCodeField.style.height = JoinCodeFieldHeight;
             joinCodeField.style.marginBottom = 10f;
             joinCodeField.style.paddingLeft = 12f;
@@ -400,8 +399,7 @@ namespace RunnerGame.Online
 
         private void OnJoinClicked()
         {
-            string joinCode = NormalizeJoinCode(joinCodeField.value);
-            if (!canStartSession || string.IsNullOrWhiteSpace(joinCode))
+            if (!canStartSession || !TryGetValidJoinCode(out string joinCode))
             {
                 return;
             }
@@ -416,6 +414,13 @@ namespace RunnerGame.Online
 
         private void OnJoinCodeChanged(ChangeEvent<string> evt)
         {
+            string rawJoinCode = evt.newValue ?? string.Empty;
+            string joinCode = SessionBootstrapper.NormalizeRoomCodeInput(evt.newValue);
+            if (rawJoinCode.Length != joinCode.Length)
+            {
+                joinCodeField.SetValueWithoutNotify(joinCode);
+            }
+
             RefreshJoinButtonState();
         }
 
@@ -426,7 +431,7 @@ namespace RunnerGame.Online
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(NormalizeJoinCode(joinCodeField.value)))
+            if (TryGetValidJoinCode(out _))
             {
                 OnJoinClicked();
                 evt.StopPropagation();
@@ -440,21 +445,33 @@ namespace RunnerGame.Online
                 return;
             }
 
-            bool hasJoinCode = !string.IsNullOrWhiteSpace(NormalizeJoinCode(joinCodeField.value));
-            joinButton.SetEnabled(canStartSession && hasJoinCode);
+            bool hasValidJoinCode = TryGetValidJoinCode(out _);
+            joinButton.SetEnabled(canStartSession && hasValidJoinCode);
+            ApplyJoinCodeValidationState(hasValidJoinCode);
         }
 
-        private static string NormalizeJoinCode(string value)
+        private bool TryGetValidJoinCode(out string joinCode)
         {
-            if (string.IsNullOrWhiteSpace(value))
+            joinCode = joinCodeField == null
+                ? string.Empty
+                : SessionBootstrapper.NormalizeRoomCodeInput(joinCodeField.value);
+            return SessionBootstrapper.IsValidRoomCode(joinCode);
+        }
+
+        private void ApplyJoinCodeValidationState(bool isValid)
+        {
+            if (joinCodeField == null)
             {
-                return string.Empty;
+                return;
             }
 
-            string normalized = value.Trim().ToUpperInvariant();
-            return normalized.Length <= JoinCodeMaxLength
-                ? normalized
-                : normalized.Substring(0, JoinCodeMaxLength);
+            Color borderColor = isValid
+                ? new Color(0.47f, 0.72f, 1f, 0.86f)
+                : new Color(1f, 1f, 1f, 0.12f);
+            joinCodeField.style.borderLeftColor = borderColor;
+            joinCodeField.style.borderRightColor = borderColor;
+            joinCodeField.style.borderTopColor = borderColor;
+            joinCodeField.style.borderBottomColor = borderColor;
         }
 
         private static void SetDisplay(VisualElement element, bool visible)
