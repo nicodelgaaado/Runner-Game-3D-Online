@@ -6,9 +6,10 @@ namespace RunnerGame.Online
     [RequireComponent(typeof(UIDocument))]
     public class BootstrapMenuView : MonoBehaviour
     {
+        private const string BootstrapRuntimeThemeResource = "BootstrapRuntimeTheme";
+        private const string BootstrapMenuStyleSheetResource = "BootstrapMenuStyles";
         private const float JoinCodeFieldHeight = 48f;
         private const float JoinCodeFontSize = 18f;
-        private const float JoinCodeLineHeight = 22f;
         private const float JoinCodeVerticalPadding = 0f;
 
         private SessionBootstrapper bootstrapper;
@@ -29,6 +30,7 @@ namespace RunnerGame.Online
         private Button joinButton;
         private Button leaveButton;
         private bool canStartSession;
+        private bool normalizingJoinCode;
 
         public void Initialize(SessionBootstrapper owner, Font fontAsset)
         {
@@ -81,10 +83,32 @@ namespace RunnerGame.Online
                 panelSettings.screenMatchMode = PanelScreenMatchMode.MatchWidthOrHeight;
                 panelSettings.match = 0.5f;
                 panelSettings.sortingOrder = 100;
+                EnsureThemeStyleSheet(panelSettings);
                 document.panelSettings = panelSettings;
+            }
+            else
+            {
+                EnsureThemeStyleSheet(document.panelSettings);
             }
 
             document.sortingOrder = 100;
+        }
+
+        private static void EnsureThemeStyleSheet(PanelSettings settings)
+        {
+            if (settings == null || settings.themeStyleSheet != null)
+            {
+                return;
+            }
+
+            ThemeStyleSheet theme = Resources.Load<ThemeStyleSheet>(BootstrapRuntimeThemeResource);
+            if (theme == null)
+            {
+                Debug.LogWarning($"Bootstrap menu could not load UI Toolkit theme '{BootstrapRuntimeThemeResource}'.");
+                return;
+            }
+
+            settings.themeStyleSheet = theme;
         }
 
         private void BuildInterface(Font fontAsset)
@@ -92,6 +116,7 @@ namespace RunnerGame.Online
             menuFont = LoadMenuFont(fontAsset);
             root = document.rootVisualElement;
             root.Clear();
+            ApplyBootstrapStyleSheet(root);
             root.name = "bootstrap-menu-root";
             root.pickingMode = PickingMode.Position;
             root.style.flexGrow = 1f;
@@ -165,7 +190,7 @@ namespace RunnerGame.Online
             joinCodeField.style.backgroundColor = new Color(0.08f, 0.105f, 0.14f, 0.98f);
             joinCodeField.style.color = Color.white;
             joinCodeField.style.fontSize = JoinCodeFontSize;
-            joinCodeField.style.unityTextAlign = TextAnchor.MiddleLeft;
+            joinCodeField.style.unityTextAlign = TextAnchor.MiddleCenter;
             joinCodeField.style.borderTopLeftRadius = 6f;
             joinCodeField.style.borderTopRightRadius = 6f;
             joinCodeField.style.borderBottomLeftRadius = 6f;
@@ -231,6 +256,24 @@ namespace RunnerGame.Online
             debugLabel = MakeFixedLabel(string.Empty, 11, new Color(0.75f, 0.82f, 0.90f, 1f), TextAnchor.MiddleLeft, 260f);
             debugLabel.style.whiteSpace = WhiteSpace.Normal;
             debugPanel.Add(debugLabel);
+        }
+
+        private static void ApplyBootstrapStyleSheet(VisualElement target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            StyleSheet styleSheet = Resources.Load<StyleSheet>(BootstrapMenuStyleSheetResource);
+            if (styleSheet == null)
+            {
+                Debug.LogWarning($"Bootstrap menu could not load UI Toolkit stylesheet '{BootstrapMenuStyleSheetResource}'.");
+                return;
+            }
+
+            target.styleSheets.Remove(styleSheet);
+            target.styleSheets.Add(styleSheet);
         }
 
         private Label MakeLabel(string text, int fontSize, Color color, TextAnchor alignment)
@@ -349,6 +392,8 @@ namespace RunnerGame.Online
                 }
 
                 ApplyFont(element);
+                element.style.height = JoinCodeFieldHeight;
+                element.style.minHeight = JoinCodeFieldHeight;
                 element.style.flexGrow = 1f;
                 element.style.flexShrink = 1f;
                 element.style.alignItems = Align.Center;
@@ -368,21 +413,24 @@ namespace RunnerGame.Online
                 element.style.borderBottomWidth = 0f;
                 element.style.color = Color.white;
                 element.style.fontSize = JoinCodeFontSize;
-                element.style.unityTextAlign = TextAnchor.MiddleLeft;
+                element.style.unityTextAlign = TextAnchor.MiddleCenter;
                 element.style.whiteSpace = WhiteSpace.NoWrap;
             });
 
             field.Query<TextElement>().ForEach(text =>
             {
                 ApplyFont(text);
+                text.style.flexGrow = 0f;
+                text.style.flexShrink = 0f;
+                text.style.alignSelf = Align.Stretch;
+                text.style.width = Length.Percent(100f);
                 text.style.color = Color.white;
                 text.style.fontSize = JoinCodeFontSize;
-                text.style.height = JoinCodeLineHeight;
                 text.style.marginLeft = 0f;
                 text.style.marginRight = 0f;
                 text.style.marginTop = 0f;
                 text.style.marginBottom = 0f;
-                text.style.unityTextAlign = TextAnchor.MiddleLeft;
+                text.style.unityTextAlign = TextAnchor.MiddleCenter;
                 text.style.whiteSpace = WhiteSpace.NoWrap;
             });
         }
@@ -414,11 +462,26 @@ namespace RunnerGame.Online
 
         private void OnJoinCodeChanged(ChangeEvent<string> evt)
         {
+            if (normalizingJoinCode)
+            {
+                RefreshJoinButtonState();
+                return;
+            }
+
             string rawJoinCode = evt.newValue ?? string.Empty;
             string joinCode = SessionBootstrapper.NormalizeRoomCodeInput(evt.newValue);
-            if (rawJoinCode.Length != joinCode.Length)
+            if (rawJoinCode != joinCode)
             {
-                joinCodeField.SetValueWithoutNotify(joinCode);
+                normalizingJoinCode = true;
+                try
+                {
+                    joinCodeField.value = joinCode;
+                    joinCodeField.SelectRange(joinCode.Length, joinCode.Length);
+                }
+                finally
+                {
+                    normalizingJoinCode = false;
+                }
             }
 
             RefreshJoinButtonState();
