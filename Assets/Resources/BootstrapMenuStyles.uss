@@ -5,8 +5,6 @@
     color: rgb(255, 255, 255);
 }
 
-#join-code-field #unity-text-input,
-#join-code-field TextInput,
 #join-code-field .unity-base-field__input,
 #join-code-field .unity-base-text-field__input {
     height: 48px;
@@ -21,9 +19,9 @@
     color: rgb(255, 255, 255);
 }
 
+#join-code-field #unity-text-input,
+#join-code-field TextInput,
 #join-code-field TextElement {
-    height: 48px;
-    min-height: 48px;
     --unity-cursor-color: rgb(255, 255, 255);
     --unity-selection-color: rgba(120, 184, 255, 115);
     -unity-text-align: middle-center;

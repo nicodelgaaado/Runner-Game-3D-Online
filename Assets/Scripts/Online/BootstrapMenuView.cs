@@ -30,6 +30,7 @@ namespace RunnerGame.Online
         private Button joinButton;
         private Button leaveButton;
         private bool canStartSession;
+        private bool normalizingJoinCode;
 
         public void Initialize(SessionBootstrapper owner, Font fontAsset)
         {
@@ -393,8 +394,8 @@ namespace RunnerGame.Online
                 ApplyFont(element);
                 element.style.height = JoinCodeFieldHeight;
                 element.style.minHeight = JoinCodeFieldHeight;
-                element.style.flexGrow = 0f;
-                element.style.flexShrink = 0f;
+                element.style.flexGrow = 1f;
+                element.style.flexShrink = 1f;
                 element.style.alignItems = Align.Center;
                 element.style.justifyContent = Justify.Center;
                 element.style.marginLeft = 0f;
@@ -419,8 +420,6 @@ namespace RunnerGame.Online
             field.Query<TextElement>().ForEach(text =>
             {
                 ApplyFont(text);
-                text.style.height = JoinCodeFieldHeight;
-                text.style.minHeight = JoinCodeFieldHeight;
                 text.style.flexGrow = 0f;
                 text.style.flexShrink = 0f;
                 text.style.alignSelf = Align.Stretch;
@@ -463,11 +462,26 @@ namespace RunnerGame.Online
 
         private void OnJoinCodeChanged(ChangeEvent<string> evt)
         {
+            if (normalizingJoinCode)
+            {
+                RefreshJoinButtonState();
+                return;
+            }
+
             string rawJoinCode = evt.newValue ?? string.Empty;
             string joinCode = SessionBootstrapper.NormalizeRoomCodeInput(evt.newValue);
             if (rawJoinCode != joinCode)
             {
-                joinCodeField.SetValueWithoutNotify(joinCode);
+                normalizingJoinCode = true;
+                try
+                {
+                    joinCodeField.value = joinCode;
+                    joinCodeField.SelectRange(joinCode.Length, joinCode.Length);
+                }
+                finally
+                {
+                    normalizingJoinCode = false;
+                }
             }
 
             RefreshJoinButtonState();
