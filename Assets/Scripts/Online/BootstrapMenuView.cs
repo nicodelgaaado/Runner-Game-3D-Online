@@ -6,6 +6,7 @@ namespace RunnerGame.Online
     [RequireComponent(typeof(UIDocument))]
     public class BootstrapMenuView : MonoBehaviour
     {
+        private const string BootstrapRuntimeThemeResource = "BootstrapRuntimeTheme";
         private const float JoinCodeFieldHeight = 48f;
         private const float JoinCodeFontSize = 18f;
         private const float JoinCodeLineHeight = 22f;
@@ -81,10 +82,32 @@ namespace RunnerGame.Online
                 panelSettings.screenMatchMode = PanelScreenMatchMode.MatchWidthOrHeight;
                 panelSettings.match = 0.5f;
                 panelSettings.sortingOrder = 100;
+                EnsureThemeStyleSheet(panelSettings);
                 document.panelSettings = panelSettings;
+            }
+            else
+            {
+                EnsureThemeStyleSheet(document.panelSettings);
             }
 
             document.sortingOrder = 100;
+        }
+
+        private static void EnsureThemeStyleSheet(PanelSettings settings)
+        {
+            if (settings == null || settings.themeStyleSheet != null)
+            {
+                return;
+            }
+
+            ThemeStyleSheet theme = Resources.Load<ThemeStyleSheet>(BootstrapRuntimeThemeResource);
+            if (theme == null)
+            {
+                Debug.LogWarning($"Bootstrap menu could not load UI Toolkit theme '{BootstrapRuntimeThemeResource}'.");
+                return;
+            }
+
+            settings.themeStyleSheet = theme;
         }
 
         private void BuildInterface(Font fontAsset)
