@@ -25,6 +25,7 @@ namespace RunnerGame.Online
         private Button hostButton;
         private Button joinButton;
         private Button leaveButton;
+        private bool canStartSession;
 
         public void Initialize(SessionBootstrapper owner, Font fontAsset)
         {
@@ -58,10 +59,10 @@ namespace RunnerGame.Online
             SetDisplay(leaveButton, snapshot.CanLeaveSession);
             SetDisplay(debugPanel, snapshot.ShowDebugPanel);
 
-            bool hasJoinCode = !string.IsNullOrWhiteSpace(joinCodeField.value);
-            hostButton.SetEnabled(snapshot.CanStartSession);
-            joinCodeField.SetEnabled(snapshot.CanStartSession);
-            joinButton.SetEnabled(snapshot.CanStartSession && hasJoinCode);
+            canStartSession = snapshot.CanStartSession;
+            hostButton.SetEnabled(canStartSession);
+            joinCodeField.SetEnabled(canStartSession);
+            RefreshJoinButtonState();
             leaveButton.SetEnabled(snapshot.CanLeaveSession);
         }
 
@@ -147,11 +148,13 @@ namespace RunnerGame.Online
             panel.Add(joinLabel);
 
             joinCodeField = new TextField { name = "join-code-field", isDelayed = false };
+            joinCodeField.focusable = true;
+            joinCodeField.pickingMode = PickingMode.Position;
             joinCodeField.maxLength = JoinCodeMaxLength;
             joinCodeField.style.height = 48f;
             joinCodeField.style.marginBottom = 10f;
-            joinCodeField.style.paddingLeft = 0f;
-            joinCodeField.style.paddingRight = 0f;
+            joinCodeField.style.paddingLeft = 12f;
+            joinCodeField.style.paddingRight = 12f;
             joinCodeField.style.paddingTop = 0f;
             joinCodeField.style.paddingBottom = 0f;
             joinCodeField.style.alignSelf = Align.Stretch;
@@ -245,7 +248,10 @@ namespace RunnerGame.Online
         private Button MakeButton(string text, System.Action callback, bool primary)
         {
             Button button = new Button(callback) { text = text };
+            button.focusable = true;
+            button.pickingMode = PickingMode.Position;
             button.style.height = 48f;
+            button.style.flexShrink = 0f;
             button.style.marginTop = 0f;
             button.style.marginBottom = 10f;
             button.style.borderTopLeftRadius = 6f;
@@ -327,9 +333,13 @@ namespace RunnerGame.Online
 
             field.Query<VisualElement>().ForEach(element =>
             {
+                if (element is TextElement)
+                {
+                    return;
+                }
+
                 bool isInputContainer = element.ClassListContains("unity-base-field__input")
-                    || element.ClassListContains("unity-base-text-field__input")
-                    || element.ClassListContains("unity-text-input");
+                    || element.ClassListContains("unity-base-text-field__input");
                 if (!isInputContainer)
                 {
                     return;
@@ -338,15 +348,12 @@ namespace RunnerGame.Online
                 ApplyFont(element);
                 element.style.flexGrow = 1f;
                 element.style.flexShrink = 1f;
-                element.style.width = Length.Percent(100f);
-                element.style.minWidth = 0f;
-                element.style.height = Length.Percent(100f);
                 element.style.marginLeft = 0f;
                 element.style.marginRight = 0f;
                 element.style.marginTop = 0f;
                 element.style.marginBottom = 0f;
-                element.style.paddingLeft = 12f;
-                element.style.paddingRight = 12f;
+                element.style.paddingLeft = 0f;
+                element.style.paddingRight = 0f;
                 element.style.paddingTop = 0f;
                 element.style.paddingBottom = 0f;
                 element.style.backgroundColor = transparent;
@@ -367,26 +374,28 @@ namespace RunnerGame.Online
                 text.style.fontSize = 18f;
                 text.style.unityTextAlign = TextAnchor.MiddleLeft;
                 text.style.whiteSpace = WhiteSpace.NoWrap;
-                text.style.flexGrow = 1f;
-                text.style.flexShrink = 1f;
-                text.style.width = Length.Percent(100f);
-                text.style.minWidth = 0f;
-                text.style.height = Length.Percent(100f);
-                text.style.marginLeft = 0f;
-                text.style.marginRight = 0f;
-                text.style.marginTop = 0f;
-                text.style.marginBottom = 0f;
             });
         }
 
         private void OnHostClicked()
         {
+            if (!canStartSession)
+            {
+                return;
+            }
+
             bootstrapper?.SubmitHostFromMenu();
         }
 
         private void OnJoinClicked()
         {
-            bootstrapper?.SubmitJoinFromMenu(joinCodeField.value);
+            string joinCode = NormalizeJoinCode(joinCodeField.value);
+            if (!canStartSession || string.IsNullOrWhiteSpace(joinCode))
+            {
+                return;
+            }
+
+            bootstrapper?.SubmitJoinFromMenu(joinCode);
         }
 
         private void OnLeaveClicked()
@@ -396,16 +405,7 @@ namespace RunnerGame.Online
 
         private void OnJoinCodeChanged(ChangeEvent<string> evt)
         {
-            string normalized = NormalizeJoinCode(evt.newValue);
-            if (normalized != evt.newValue)
-            {
-                joinCodeField.SetValueWithoutNotify(normalized);
-            }
-
-            if (bootstrapper != null)
-            {
-                Refresh(bootstrapper.CreateMenuSnapshot());
-            }
+            RefreshJoinButtonState();
         }
 
         private void OnJoinCodeKeyDown(KeyDownEvent evt)
@@ -415,11 +415,22 @@ namespace RunnerGame.Online
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(joinCodeField.value))
+            if (!string.IsNullOrWhiteSpace(NormalizeJoinCode(joinCodeField.value)))
             {
                 OnJoinClicked();
                 evt.StopPropagation();
             }
+        }
+
+        private void RefreshJoinButtonState()
+        {
+            if (joinButton == null || joinCodeField == null)
+            {
+                return;
+            }
+
+            bool hasJoinCode = !string.IsNullOrWhiteSpace(NormalizeJoinCode(joinCodeField.value));
+            joinButton.SetEnabled(canStartSession && hasJoinCode);
         }
 
         private static string NormalizeJoinCode(string value)
