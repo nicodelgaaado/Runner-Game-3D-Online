@@ -145,7 +145,8 @@ namespace RunnerGame.Online
         private const string PlayerPrefabResourcePath = "RunnerNetworkPlayer";
         private const string RaceManagerPrefabResourcePath = "NetworkRaceManager";
         private const string RunnerObjectName = "FusionRunner";
-        private const string RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        internal const int RoomCodeLength = 6;
+        internal const string RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
         private const int MaxStartAttempts = 3;
         private const int StartRetryDelayMilliseconds = 1500;
         private const float GameplayLoadWatchdogTimeoutSeconds = 12f;
@@ -287,12 +288,12 @@ namespace RunnerGame.Online
 
         public async Task JoinPrivateMatchAsync(string joinCode)
         {
-            if (!CanStartNewSession() || string.IsNullOrWhiteSpace(joinCode))
+            string normalizedCode = NormalizeRoomCodeInput(joinCode);
+            if (!CanStartNewSession() || !IsValidRoomCode(normalizedCode))
             {
                 return;
             }
 
-            string normalizedCode = joinCode.Trim().ToUpperInvariant();
             state = BootstrapState.JoiningSession;
             statusMessage = $"Joining private room {normalizedCode}...";
             await StartSessionAsync(normalizedCode);
@@ -341,13 +342,14 @@ namespace RunnerGame.Online
 
         public void SubmitJoinFromMenu(string joinCode)
         {
-            if (!CanStartNewSession() || string.IsNullOrWhiteSpace(joinCode))
+            string normalizedCode = NormalizeRoomCodeInput(joinCode);
+            if (!CanStartNewSession() || !IsValidRoomCode(normalizedCode))
             {
                 return;
             }
 
             EnsureAudioDirector().PlayUiSelect();
-            _ = JoinPrivateMatchAsync(joinCode);
+            _ = JoinPrivateMatchAsync(normalizedCode);
         }
 
         public void SubmitLeaveFromMenu()
@@ -614,7 +616,7 @@ namespace RunnerGame.Online
 
         private static string GenerateRoomCode()
         {
-            char[] buffer = new char[6];
+            char[] buffer = new char[RoomCodeLength];
             byte[] randomBytes = new byte[buffer.Length];
             RandomNumberGenerator.Fill(randomBytes);
             for (int index = 0; index < buffer.Length; index++)
@@ -623,6 +625,44 @@ namespace RunnerGame.Online
             }
 
             return new string(buffer);
+        }
+
+        internal static string NormalizeRoomCodeInput(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new StringBuilder(RoomCodeLength);
+            for (int index = 0; index < value.Length && builder.Length < RoomCodeLength; index++)
+            {
+                char normalizedCharacter = char.ToUpperInvariant(value[index]);
+                if (RoomCodeAlphabet.IndexOf(normalizedCharacter) >= 0)
+                {
+                    builder.Append(normalizedCharacter);
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        internal static bool IsValidRoomCode(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length != RoomCodeLength)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < value.Length; index++)
+            {
+                if (RoomCodeAlphabet.IndexOf(value[index]) < 0)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private void ResetGameplaySpawnState()
