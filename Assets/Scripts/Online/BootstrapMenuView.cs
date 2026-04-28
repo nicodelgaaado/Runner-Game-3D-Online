@@ -7,6 +7,7 @@ namespace RunnerGame.Online
     public class BootstrapMenuView : MonoBehaviour
     {
         private const string BootstrapRuntimeThemeResource = "BootstrapRuntimeTheme";
+        private const string BootstrapMenuStyleSheetResource = "BootstrapMenuStyles";
         private const float JoinCodeFieldHeight = 48f;
         private const float JoinCodeFontSize = 18f;
         private const float JoinCodeLineHeight = 22f;
@@ -115,6 +116,7 @@ namespace RunnerGame.Online
             menuFont = LoadMenuFont(fontAsset);
             root = document.rootVisualElement;
             root.Clear();
+            ApplyBootstrapStyleSheet(root);
             root.name = "bootstrap-menu-root";
             root.pickingMode = PickingMode.Position;
             root.style.flexGrow = 1f;
@@ -188,7 +190,7 @@ namespace RunnerGame.Online
             joinCodeField.style.backgroundColor = new Color(0.08f, 0.105f, 0.14f, 0.98f);
             joinCodeField.style.color = Color.white;
             joinCodeField.style.fontSize = JoinCodeFontSize;
-            joinCodeField.style.unityTextAlign = TextAnchor.MiddleLeft;
+            joinCodeField.style.unityTextAlign = TextAnchor.MiddleCenter;
             joinCodeField.style.borderTopLeftRadius = 6f;
             joinCodeField.style.borderTopRightRadius = 6f;
             joinCodeField.style.borderBottomLeftRadius = 6f;
@@ -254,6 +256,24 @@ namespace RunnerGame.Online
             debugLabel = MakeFixedLabel(string.Empty, 11, new Color(0.75f, 0.82f, 0.90f, 1f), TextAnchor.MiddleLeft, 260f);
             debugLabel.style.whiteSpace = WhiteSpace.Normal;
             debugPanel.Add(debugLabel);
+        }
+
+        private static void ApplyBootstrapStyleSheet(VisualElement target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            StyleSheet styleSheet = Resources.Load<StyleSheet>(BootstrapMenuStyleSheetResource);
+            if (styleSheet == null)
+            {
+                Debug.LogWarning($"Bootstrap menu could not load UI Toolkit stylesheet '{BootstrapMenuStyleSheetResource}'.");
+                return;
+            }
+
+            target.styleSheets.Remove(styleSheet);
+            target.styleSheets.Add(styleSheet);
         }
 
         private Label MakeLabel(string text, int fontSize, Color color, TextAnchor alignment)
@@ -391,13 +411,16 @@ namespace RunnerGame.Online
                 element.style.borderBottomWidth = 0f;
                 element.style.color = Color.white;
                 element.style.fontSize = JoinCodeFontSize;
-                element.style.unityTextAlign = TextAnchor.MiddleLeft;
+                element.style.unityTextAlign = TextAnchor.MiddleCenter;
                 element.style.whiteSpace = WhiteSpace.NoWrap;
             });
 
             field.Query<TextElement>().ForEach(text =>
             {
                 ApplyFont(text);
+                text.style.flexGrow = 1f;
+                text.style.alignSelf = Align.Stretch;
+                text.style.width = Length.Percent(100f);
                 text.style.color = Color.white;
                 text.style.fontSize = JoinCodeFontSize;
                 text.style.height = JoinCodeLineHeight;
@@ -405,7 +428,7 @@ namespace RunnerGame.Online
                 text.style.marginRight = 0f;
                 text.style.marginTop = 0f;
                 text.style.marginBottom = 0f;
-                text.style.unityTextAlign = TextAnchor.MiddleLeft;
+                text.style.unityTextAlign = TextAnchor.MiddleCenter;
                 text.style.whiteSpace = WhiteSpace.NoWrap;
             });
         }
@@ -439,7 +462,7 @@ namespace RunnerGame.Online
         {
             string rawJoinCode = evt.newValue ?? string.Empty;
             string joinCode = SessionBootstrapper.NormalizeRoomCodeInput(evt.newValue);
-            if (rawJoinCode.Length != joinCode.Length)
+            if (rawJoinCode != joinCode)
             {
                 joinCodeField.SetValueWithoutNotify(joinCode);
             }
