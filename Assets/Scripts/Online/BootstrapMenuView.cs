@@ -10,7 +10,9 @@ namespace RunnerGame.Online
         private const string BootstrapMenuStyleSheetResource = "BootstrapMenuStyles";
         private const float JoinCodeFieldHeight = 48f;
         private const float JoinCodeFontSize = 18f;
-        private const float JoinCodeVerticalPadding = 0f;
+        private const float JoinCodeCaretWidth = 2f;
+        private const float JoinCodeCaretHeight = 24f;
+        private const float JoinCodeCaretBlinkInterval = 0.48f;
 
         private SessionBootstrapper bootstrapper;
         private UIDocument document;
@@ -25,12 +27,18 @@ namespace RunnerGame.Online
         private Label playersLabel;
         private Label modeLabel;
         private Label debugLabel;
-        private TextField joinCodeField;
+        private VisualElement joinCodeField;
+        private VisualElement joinCodeContent;
+        private Label joinCodeTextLabel;
+        private VisualElement joinCodeCaret;
         private Button hostButton;
         private Button joinButton;
         private Button leaveButton;
         private bool canStartSession;
-        private bool normalizingJoinCode;
+        private bool joinCodeFocused;
+        private bool joinCodeCaretVisible;
+        private float nextJoinCodeCaretBlinkTime;
+        private string joinCodeInput = string.Empty;
 
         public void Initialize(SessionBootstrapper owner, Font fontAsset)
         {
@@ -65,6 +73,12 @@ namespace RunnerGame.Online
             SetDisplay(debugPanel, snapshot.ShowDebugPanel);
 
             canStartSession = snapshot.CanStartSession;
+            if (!canStartSession)
+            {
+                joinCodeFocused = false;
+                SetJoinCodeCaretVisible(false);
+            }
+
             hostButton.SetEnabled(canStartSession);
             joinCodeField.SetEnabled(canStartSession);
             RefreshJoinButtonState();
@@ -114,6 +128,10 @@ namespace RunnerGame.Online
         private void BuildInterface(Font fontAsset)
         {
             menuFont = LoadMenuFont(fontAsset);
+            joinCodeFocused = false;
+            joinCodeCaretVisible = false;
+            nextJoinCodeCaretBlinkTime = 0f;
+            joinCodeInput = string.Empty;
             root = document.rootVisualElement;
             root.Clear();
             ApplyBootstrapStyleSheet(root);
@@ -175,18 +193,21 @@ namespace RunnerGame.Online
             joinLabel.style.marginBottom = 6f;
             panel.Add(joinLabel);
 
-            joinCodeField = new TextField { name = "join-code-field", isDelayed = false };
+            joinCodeField = new VisualElement { name = "join-code-field" };
             joinCodeField.focusable = true;
             joinCodeField.pickingMode = PickingMode.Position;
-            joinCodeField.maxLength = SessionBootstrapper.RoomCodeLength;
             joinCodeField.style.height = JoinCodeFieldHeight;
             joinCodeField.style.marginBottom = 10f;
             joinCodeField.style.paddingLeft = 12f;
             joinCodeField.style.paddingRight = 12f;
-            joinCodeField.style.paddingTop = JoinCodeVerticalPadding;
+            joinCodeField.style.paddingTop = 0f;
             joinCodeField.style.paddingBottom = 0f;
             joinCodeField.style.alignSelf = Align.Stretch;
             joinCodeField.style.flexShrink = 0f;
+            joinCodeField.style.flexDirection = FlexDirection.Row;
+            joinCodeField.style.alignItems = Align.Center;
+            joinCodeField.style.justifyContent = Justify.Center;
+            joinCodeField.style.overflow = Overflow.Hidden;
             joinCodeField.style.backgroundColor = new Color(0.08f, 0.105f, 0.14f, 0.98f);
             joinCodeField.style.color = Color.white;
             joinCodeField.style.fontSize = JoinCodeFontSize;
@@ -203,9 +224,44 @@ namespace RunnerGame.Online
             joinCodeField.style.borderRightColor = new Color(1f, 1f, 1f, 0.12f);
             joinCodeField.style.borderTopColor = new Color(1f, 1f, 1f, 0.12f);
             joinCodeField.style.borderBottomColor = new Color(1f, 1f, 1f, 0.12f);
-            joinCodeField.RegisterValueChangedCallback(OnJoinCodeChanged);
-            joinCodeField.RegisterCallback<KeyDownEvent>(OnJoinCodeKeyDown);
-            ApplyTextFieldTextStyle(joinCodeField);
+            joinCodeField.RegisterCallback<PointerDownEvent>(OnJoinCodePointerDown);
+            joinCodeField.RegisterCallback<FocusInEvent>(OnJoinCodeFocusIn);
+            joinCodeField.RegisterCallback<FocusOutEvent>(OnJoinCodeFocusOut);
+            ApplyFont(joinCodeField);
+
+            joinCodeContent = new VisualElement { name = "join-code-content" };
+            joinCodeContent.pickingMode = PickingMode.Ignore;
+            joinCodeContent.style.height = JoinCodeFieldHeight;
+            joinCodeContent.style.minHeight = JoinCodeFieldHeight;
+            joinCodeContent.style.flexDirection = FlexDirection.Row;
+            joinCodeContent.style.alignItems = Align.Center;
+            joinCodeContent.style.justifyContent = Justify.Center;
+            joinCodeContent.style.flexGrow = 0f;
+            joinCodeContent.style.flexShrink = 1f;
+            joinCodeContent.style.overflow = Overflow.Hidden;
+
+            joinCodeTextLabel = MakeFixedLabel(string.Empty, (int)JoinCodeFontSize, Color.white, TextAnchor.MiddleCenter, JoinCodeFieldHeight);
+            joinCodeTextLabel.name = "join-code-value";
+            joinCodeTextLabel.pickingMode = PickingMode.Ignore;
+            joinCodeTextLabel.style.height = JoinCodeFieldHeight;
+            joinCodeTextLabel.style.minHeight = JoinCodeFieldHeight;
+            joinCodeTextLabel.style.flexGrow = 0f;
+            joinCodeTextLabel.style.flexShrink = 1f;
+            joinCodeTextLabel.style.whiteSpace = WhiteSpace.NoWrap;
+            joinCodeTextLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+
+            joinCodeCaret = new VisualElement { name = "join-code-caret" };
+            joinCodeCaret.pickingMode = PickingMode.Ignore;
+            joinCodeCaret.style.width = JoinCodeCaretWidth;
+            joinCodeCaret.style.height = JoinCodeCaretHeight;
+            joinCodeCaret.style.minWidth = JoinCodeCaretWidth;
+            joinCodeCaret.style.maxWidth = JoinCodeCaretWidth;
+            joinCodeCaret.style.marginLeft = 3f;
+            joinCodeCaret.style.backgroundColor = new Color(1f, 1f, 1f, 0f);
+
+            joinCodeContent.Add(joinCodeTextLabel);
+            joinCodeContent.Add(joinCodeCaret);
+            joinCodeField.Add(joinCodeContent);
             panel.Add(joinCodeField);
 
             joinButton = MakeButton("Join Match", OnJoinClicked, false);
@@ -366,73 +422,10 @@ namespace RunnerGame.Online
             });
         }
 
-        private void ApplyTextFieldTextStyle(TextField field)
+        private void Update()
         {
-            ApplyFont(field);
-            field.RegisterCallback<AttachToPanelEvent>(_ => ApplyTextFieldTextStyleNow(field));
-            ApplyTextFieldTextStyleNow(field);
-        }
-
-        private void ApplyTextFieldTextStyleNow(TextField field)
-        {
-            Color transparent = new Color(0f, 0f, 0f, 0f);
-
-            field.Query<VisualElement>().ForEach(element =>
-            {
-                if (element is TextElement)
-                {
-                    return;
-                }
-
-                bool isInputContainer = element.ClassListContains("unity-base-field__input")
-                    || element.ClassListContains("unity-base-text-field__input");
-                if (!isInputContainer)
-                {
-                    return;
-                }
-
-                ApplyFont(element);
-                element.style.height = JoinCodeFieldHeight;
-                element.style.minHeight = JoinCodeFieldHeight;
-                element.style.flexGrow = 1f;
-                element.style.flexShrink = 1f;
-                element.style.alignItems = Align.Center;
-                element.style.justifyContent = Justify.Center;
-                element.style.marginLeft = 0f;
-                element.style.marginRight = 0f;
-                element.style.marginTop = 0f;
-                element.style.marginBottom = 0f;
-                element.style.paddingLeft = 0f;
-                element.style.paddingRight = 0f;
-                element.style.paddingTop = 0f;
-                element.style.paddingBottom = 0f;
-                element.style.backgroundColor = transparent;
-                element.style.borderLeftWidth = 0f;
-                element.style.borderRightWidth = 0f;
-                element.style.borderTopWidth = 0f;
-                element.style.borderBottomWidth = 0f;
-                element.style.color = Color.white;
-                element.style.fontSize = JoinCodeFontSize;
-                element.style.unityTextAlign = TextAnchor.MiddleCenter;
-                element.style.whiteSpace = WhiteSpace.NoWrap;
-            });
-
-            field.Query<TextElement>().ForEach(text =>
-            {
-                ApplyFont(text);
-                text.style.flexGrow = 0f;
-                text.style.flexShrink = 0f;
-                text.style.alignSelf = Align.Stretch;
-                text.style.width = Length.Percent(100f);
-                text.style.color = Color.white;
-                text.style.fontSize = JoinCodeFontSize;
-                text.style.marginLeft = 0f;
-                text.style.marginRight = 0f;
-                text.style.marginTop = 0f;
-                text.style.marginBottom = 0f;
-                text.style.unityTextAlign = TextAnchor.MiddleCenter;
-                text.style.whiteSpace = WhiteSpace.NoWrap;
-            });
+            ProcessJoinCodeKeyboardInput();
+            UpdateJoinCodeCaretBlink();
         }
 
         private void OnHostClicked()
@@ -460,44 +453,57 @@ namespace RunnerGame.Online
             bootstrapper?.SubmitLeaveFromMenu();
         }
 
-        private void OnJoinCodeChanged(ChangeEvent<string> evt)
+        private void OnJoinCodePointerDown(PointerDownEvent evt)
         {
-            if (normalizingJoinCode)
+            if (canStartSession)
             {
-                RefreshJoinButtonState();
-                return;
+                joinCodeFocused = true;
+                joinCodeField?.Focus();
+                ForceJoinCodeCaretVisible();
+                evt.StopPropagation();
             }
+        }
 
-            string rawJoinCode = evt.newValue ?? string.Empty;
-            string joinCode = SessionBootstrapper.NormalizeRoomCodeInput(evt.newValue);
-            if (rawJoinCode != joinCode)
-            {
-                normalizingJoinCode = true;
-                try
-                {
-                    joinCodeField.value = joinCode;
-                    joinCodeField.SelectRange(joinCode.Length, joinCode.Length);
-                }
-                finally
-                {
-                    normalizingJoinCode = false;
-                }
-            }
-
+        private void OnJoinCodeFocusIn(FocusInEvent evt)
+        {
+            joinCodeFocused = true;
+            ForceJoinCodeCaretVisible();
             RefreshJoinButtonState();
         }
 
-        private void OnJoinCodeKeyDown(KeyDownEvent evt)
+        private void OnJoinCodeFocusOut(FocusOutEvent evt)
         {
-            if (evt.keyCode != KeyCode.Return && evt.keyCode != KeyCode.KeypadEnter)
+            joinCodeFocused = false;
+            SetJoinCodeCaretVisible(false);
+            RefreshJoinButtonState();
+        }
+
+        private void ProcessJoinCodeKeyboardInput()
+        {
+            if (!joinCodeFocused || !canStartSession)
             {
                 return;
             }
 
-            if (TryGetValidJoinCode(out _))
+            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
             {
-                OnJoinClicked();
-                evt.StopPropagation();
+                if (TryGetValidJoinCode(out _))
+                {
+                    OnJoinClicked();
+                }
+
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.Backspace) || Input.GetKeyDown(KeyCode.Delete))
+            {
+                RemoveLastJoinCodeCharacter();
+                return;
+            }
+
+            if (TryGetPressedJoinCodeCharacter(out char character))
+            {
+                AppendJoinCodeCharacter(character);
             }
         }
 
@@ -513,12 +519,148 @@ namespace RunnerGame.Online
             ApplyJoinCodeValidationState(hasValidJoinCode);
         }
 
+        private void AppendJoinCodeCharacter(char character)
+        {
+            if (joinCodeInput.Length >= SessionBootstrapper.RoomCodeLength)
+            {
+                RefreshJoinButtonState();
+                return;
+            }
+
+            joinCodeInput += character;
+            RefreshJoinCodeText();
+            ForceJoinCodeCaretVisible();
+            RefreshJoinButtonState();
+        }
+
+        private void RemoveLastJoinCodeCharacter()
+        {
+            if (joinCodeInput.Length <= 0)
+            {
+                RefreshJoinButtonState();
+                return;
+            }
+
+            joinCodeInput = joinCodeInput.Substring(0, joinCodeInput.Length - 1);
+            RefreshJoinCodeText();
+            ForceJoinCodeCaretVisible();
+            RefreshJoinButtonState();
+        }
+
+        private void RefreshJoinCodeText()
+        {
+            if (joinCodeTextLabel != null)
+            {
+                joinCodeTextLabel.text = joinCodeInput;
+                joinCodeTextLabel.MarkDirtyRepaint();
+            }
+
+            joinCodeContent?.MarkDirtyRepaint();
+            joinCodeField?.MarkDirtyRepaint();
+        }
+
+        private void ForceJoinCodeCaretVisible()
+        {
+            nextJoinCodeCaretBlinkTime = Time.unscaledTime + JoinCodeCaretBlinkInterval;
+            SetJoinCodeCaretVisible(joinCodeFocused && canStartSession);
+        }
+
+        private void UpdateJoinCodeCaretBlink()
+        {
+            if (joinCodeCaret == null)
+            {
+                return;
+            }
+
+            if (!joinCodeFocused || !canStartSession)
+            {
+                SetJoinCodeCaretVisible(false);
+                return;
+            }
+
+            if (Time.unscaledTime < nextJoinCodeCaretBlinkTime)
+            {
+                return;
+            }
+
+            nextJoinCodeCaretBlinkTime = Time.unscaledTime + JoinCodeCaretBlinkInterval;
+            SetJoinCodeCaretVisible(!joinCodeCaretVisible);
+        }
+
+        private void SetJoinCodeCaretVisible(bool visible)
+        {
+            joinCodeCaretVisible = visible;
+            if (joinCodeCaret != null)
+            {
+                joinCodeCaret.style.backgroundColor = visible
+                    ? Color.white
+                    : new Color(1f, 1f, 1f, 0f);
+                joinCodeCaret.MarkDirtyRepaint();
+            }
+        }
+
         private bool TryGetValidJoinCode(out string joinCode)
         {
-            joinCode = joinCodeField == null
-                ? string.Empty
-                : SessionBootstrapper.NormalizeRoomCodeInput(joinCodeField.value);
+            joinCode = SessionBootstrapper.NormalizeRoomCodeInput(joinCodeInput);
             return SessionBootstrapper.IsValidRoomCode(joinCode);
+        }
+
+        private static bool TryGetPressedJoinCodeCharacter(out char character)
+        {
+            for (int key = (int)KeyCode.A; key <= (int)KeyCode.Z; key++)
+            {
+                KeyCode keyCode = (KeyCode)key;
+                if (Input.GetKeyDown(keyCode) && TryGetJoinCodeCharacter(keyCode, out character))
+                {
+                    return true;
+                }
+            }
+
+            for (int key = (int)KeyCode.Alpha0; key <= (int)KeyCode.Alpha9; key++)
+            {
+                KeyCode keyCode = (KeyCode)key;
+                if (Input.GetKeyDown(keyCode) && TryGetJoinCodeCharacter(keyCode, out character))
+                {
+                    return true;
+                }
+            }
+
+            for (int key = (int)KeyCode.Keypad0; key <= (int)KeyCode.Keypad9; key++)
+            {
+                KeyCode keyCode = (KeyCode)key;
+                if (Input.GetKeyDown(keyCode) && TryGetJoinCodeCharacter(keyCode, out character))
+                {
+                    return true;
+                }
+            }
+
+            character = '\0';
+            return false;
+        }
+
+        private static bool TryGetJoinCodeCharacter(KeyCode keyCode, out char character)
+        {
+            character = '\0';
+            int key = (int)keyCode;
+
+            if (key >= (int)KeyCode.A && key <= (int)KeyCode.Z)
+            {
+                character = (char)('A' + (key - (int)KeyCode.A));
+            }
+            else if (key >= (int)KeyCode.Alpha0 && key <= (int)KeyCode.Alpha9)
+            {
+                character = (char)('0' + (key - (int)KeyCode.Alpha0));
+            }
+            else if (key >= (int)KeyCode.Keypad0 && key <= (int)KeyCode.Keypad9)
+            {
+                character = (char)('0' + (key - (int)KeyCode.Keypad0));
+            }
+            else
+            {
+                return false;
+            }
+
+            return SessionBootstrapper.RoomCodeAlphabet.IndexOf(character) >= 0;
         }
 
         private void ApplyJoinCodeValidationState(bool isValid)
@@ -530,7 +672,9 @@ namespace RunnerGame.Online
 
             Color borderColor = isValid
                 ? new Color(0.47f, 0.72f, 1f, 0.86f)
-                : new Color(1f, 1f, 1f, 0.12f);
+                : joinCodeFocused
+                    ? new Color(0.47f, 0.72f, 1f, 0.42f)
+                    : new Color(1f, 1f, 1f, 0.12f);
             joinCodeField.style.borderLeftColor = borderColor;
             joinCodeField.style.borderRightColor = borderColor;
             joinCodeField.style.borderTopColor = borderColor;
