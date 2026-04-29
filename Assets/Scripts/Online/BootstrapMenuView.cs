@@ -10,7 +10,6 @@ namespace RunnerGame.Online
         private const string BootstrapMenuStyleSheetResource = "BootstrapMenuStyles";
         private const float JoinCodeFieldHeight = 48f;
         private const float JoinCodeFontSize = 18f;
-        private const float JoinCodeVerticalPadding = 0f;
 
         private SessionBootstrapper bootstrapper;
         private UIDocument document;
@@ -30,7 +29,6 @@ namespace RunnerGame.Online
         private Button joinButton;
         private Button leaveButton;
         private bool canStartSession;
-        private bool normalizingJoinCode;
 
         public void Initialize(SessionBootstrapper owner, Font fontAsset)
         {
@@ -175,7 +173,7 @@ namespace RunnerGame.Online
             joinLabel.style.marginBottom = 6f;
             panel.Add(joinLabel);
 
-            joinCodeField = new TextField { name = "join-code-field", isDelayed = false };
+            joinCodeField = new JoinCodeTextField { name = "join-code-field", isDelayed = false };
             joinCodeField.focusable = true;
             joinCodeField.pickingMode = PickingMode.Position;
             joinCodeField.maxLength = SessionBootstrapper.RoomCodeLength;
@@ -183,7 +181,7 @@ namespace RunnerGame.Online
             joinCodeField.style.marginBottom = 10f;
             joinCodeField.style.paddingLeft = 12f;
             joinCodeField.style.paddingRight = 12f;
-            joinCodeField.style.paddingTop = JoinCodeVerticalPadding;
+            joinCodeField.style.paddingTop = 0f;
             joinCodeField.style.paddingBottom = 0f;
             joinCodeField.style.alignSelf = Align.Stretch;
             joinCodeField.style.flexShrink = 0f;
@@ -205,6 +203,7 @@ namespace RunnerGame.Online
             joinCodeField.style.borderBottomColor = new Color(1f, 1f, 1f, 0.12f);
             joinCodeField.RegisterValueChangedCallback(OnJoinCodeChanged);
             joinCodeField.RegisterCallback<KeyDownEvent>(OnJoinCodeKeyDown);
+            joinCodeField.RegisterCallback<PointerDownEvent>(OnJoinCodePointerDown);
             ApplyTextFieldTextStyle(joinCodeField);
             panel.Add(joinCodeField);
 
@@ -420,10 +419,6 @@ namespace RunnerGame.Online
             field.Query<TextElement>().ForEach(text =>
             {
                 ApplyFont(text);
-                text.style.flexGrow = 0f;
-                text.style.flexShrink = 0f;
-                text.style.alignSelf = Align.Stretch;
-                text.style.width = Length.Percent(100f);
                 text.style.color = Color.white;
                 text.style.fontSize = JoinCodeFontSize;
                 text.style.marginLeft = 0f;
@@ -462,29 +457,15 @@ namespace RunnerGame.Online
 
         private void OnJoinCodeChanged(ChangeEvent<string> evt)
         {
-            if (normalizingJoinCode)
-            {
-                RefreshJoinButtonState();
-                return;
-            }
-
-            string rawJoinCode = evt.newValue ?? string.Empty;
-            string joinCode = SessionBootstrapper.NormalizeRoomCodeInput(evt.newValue);
-            if (rawJoinCode != joinCode)
-            {
-                normalizingJoinCode = true;
-                try
-                {
-                    joinCodeField.value = joinCode;
-                    joinCodeField.SelectRange(joinCode.Length, joinCode.Length);
-                }
-                finally
-                {
-                    normalizingJoinCode = false;
-                }
-            }
-
             RefreshJoinButtonState();
+        }
+
+        private void OnJoinCodePointerDown(PointerDownEvent evt)
+        {
+            if (canStartSession)
+            {
+                joinCodeField?.Focus();
+            }
         }
 
         private void OnJoinCodeKeyDown(KeyDownEvent evt)
@@ -542,6 +523,19 @@ namespace RunnerGame.Online
             if (element != null)
             {
                 element.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+        }
+
+        private sealed class JoinCodeTextField : TextField
+        {
+            protected override string StringToValue(string str)
+            {
+                return SessionBootstrapper.NormalizeRoomCodeInput(str);
+            }
+
+            protected override string ValueToString(string value)
+            {
+                return SessionBootstrapper.NormalizeRoomCodeInput(value);
             }
         }
 
