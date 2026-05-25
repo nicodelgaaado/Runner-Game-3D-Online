@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Runner Game 3D Online - Presentación</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            accent: '#f97316',
+            dark: '#0a0a1a',
+            deeper: '#060612',
+            card: '#111128',
+            cardborder: '#1e1e4a',
+            redp: '#ef4444',
+            bluep: '#3b82f6',
+          },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    * { scroll-behavior: smooth; }
+    body { background: #0a0a1a; }
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #060612; }
+    ::-webkit-scrollbar-thumb { background: #1e1e4a; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #f97316; }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-12px); }
+    }
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 20px rgba(249, 115, 22, 0.3); }
+      50% { box-shadow: 0 0 40px rgba(249, 115, 22, 0.6); }
+    }
+    @keyframes slide-up {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes bar-fill {
+      from { width: 0; }
+    }
+    @keyframes spin-slow {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .animate-float { animation: float 4s ease-in-out infinite; }
+    .animate-pulse-glow { animation: pulse-glow 3s ease-in-out infinite; }
+    .animate-slide-up { animation: slide-up 0.8s ease-out forwards; }
+    .animate-fade-in { animation: fade-in 1.2s ease-out forwards; }
+    .animate-bar { animation: bar-fill 1.5s ease-out forwards; }
+    .delay-100 { animation-delay: 0.1s; }
+    .delay-200 { animation-delay: 0.2s; }
+    .delay-300 { animation-delay: 0.3s; }
+    .delay-400 { animation-delay: 0.4s; }
+    .delay-500 { animation-delay: 0.5s; }
+    .opacity-0 { opacity: 0; }
+    .glass {
+      background: rgba(17, 17, 40, 0.7);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(30, 30, 74, 0.5);
+    }
+    .gradient-text {
+      background: linear-gradient(135deg, #f97316, #ef4444, #f97316);
+      background-size: 200% auto;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: shimmer 3s linear infinite;
+    }
+    @keyframes shimmer {
+      to { background-position: 200% center; }
+    }
+    .line-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .grid-bg {
+      background-image:
+        linear-gradient(rgba(249,115,22,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(249,115,22,0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+    }
+  </style>
+</head>
+<body class="text-gray-100 font-sans grid-bg">
+
+  <!-- ========== NAVBAR ========== -->
+  <nav class="fixed top-0 left-0 w-full z-50 glass">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <span class="text-xl font-extrabold tracking-tight">
+        <span class="text-accent">Runner</span>
+        <span class="text-white">Game</span>
+        <span class="text-gray-500 font-normal text-sm ml-1">3D</span>
+      </span>
+      <div class="hidden md:flex gap-8 text-sm font-medium">
+        <a href="#inicio" class="hover:text-accent transition-colors">Inicio</a>
+        <a href="#que-es" class="hover:text-accent transition-colors">El Juego</a>
+        <a href="#tecnologias" class="hover:text-accent transition-colors">Tecnologías</a>
+        <a href="#niveles" class="hover:text-accent transition-colors">Niveles</a>
+        <a href="#mecanicas" class="hover:text-accent transition-colors">Mecánicas</a>
+        <a href="#multijugador" class="hover:text-accent transition-colors">Multijugador</a>
+        <a href="#arquitectura" class="hover:text-accent transition-colors">Arquitectura</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ========== HERO ========== -->
+  <section id="inicio" class="min-h-screen flex items-center justify-center relative overflow-hidden pt-16">
+    <div class="absolute inset-0 opacity-20">
+      <div class="absolute top-20 left-10 w-72 h-72 bg-accent rounded-full blur-[128px]"></div>
+      <div class="absolute bottom-20 right-10 w-96 h-96 bg-bluep rounded-full blur-[128px]"></div>
+    </div>
+    <div class="text-center z-10 px-6 max-w-4xl">
+      <div class="animate-fade-in">
+        <span class="inline-block px-4 py-1.5 text-xs font-semibold uppercase tracking-widest bg-accent/10 text-accent border border-accent/20 rounded-full mb-6">
+          Unity 6 &middot; Photon Fusion 2 &middot; WebGL
+        </span>
+      </div>
+      <h1 class="text-5xl md:text-7xl lg:text-8xl font-black tracking-tight leading-none mb-6 animate-slide-up">
+        <span class="gradient-text">Runner Game</span><br />
+        <span class="text-white">3D Online</span>
+      </h1>
+      <p class="text-lg md:text-xl text-gray-400 max-w-2xl mx-auto mb-8 animate-slide-up delay-100">
+        Juego de carreras 3D multijugador en línea donde dos jugadores compiten<br class="hidden md:block" />
+        en pistas con obstáculos hasta llegar primero a la meta.
+      </p>
+      <div class="flex flex-wrap justify-center gap-4 animate-slide-up delay-200">
+        <a href="#que-es" class="px-8 py-3 bg-accent hover:bg-accent/90 text-black font-bold rounded-xl transition-all hover:scale-105">
+          Conocer el juego
+        </a>
+        <a href="#tecnologias" class="px-8 py-3 glass hover:bg-white/5 text-gray-300 font-semibold rounded-xl transition-all hover:scale-105">
+          Tecnologías
+        </a>
+      </div>
+      <div class="mt-16 grid grid-cols-2 md:grid-cols-4 gap-6 animate-slide-up delay-300">
+        <div class="glass rounded-xl p-4">
+          <div class="text-3xl font-black text-accent">5</div>
+          <div class="text-xs text-gray-500 uppercase tracking-widest mt-1">Niveles</div>
+        </div>
+        <div class="glass rounded-xl p-4">
+          <div class="text-3xl font-black text-accent">2</div>
+          <div class="text-xs text-gray-500 uppercase tracking-widest mt-1">Jugadores</div>
+        </div>
+        <div class="glass rounded-xl p-4">
+          <div class="text-3xl font-black text-accent">12+</div>
+          <div class="text-xs text-gray-500 uppercase tracking-widest mt-1">Tipos de obstáculos</div>
+        </div>
+        <div class="glass rounded-xl p-4">
+          <div class="text-3xl font-black text-accent">Unity 6</div>
+          <div class="text-xs text-gray-500 uppercase tracking-widest mt-1">Motor gráfico</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== QUÉ ES ========== -->
+  <section id="que-es" class="py-24 px-6">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16">
+        <span class="text-accent text-sm font-semibold uppercase tracking-widest">Introducción</span>
+        <h2 class="text-4xl md:text-5xl font-black mt-3">¿Qué es <span class="text-accent">Runner Game 3D Online</span>?</h2>
+        <p class="text-gray-400 mt-4 max-w-2xl mx-auto">
+          Un videojuego competitivo de carreras con obstáculos en 3D, desarrollado con Unity,
+          que enfrenta a dos jugadores en línea a través de 5 rondas temáticas.
+        </p>
+      </div>
+      <div class="grid md:grid-cols-2 gap-8">
+        <div class="glass rounded-2xl p-8 hover:border-accent/30 transition-all duration-300">
+          <div class="text-4xl mb-4">🎯</div>
+          <h3 class="text-xl font-bold mb-3">Objetivo</h3>
+          <p class="text-gray-400 leading-relaxed">
+            Ser el primero en llegar a la meta en cada una de las 5 rondas. Cada nivel presenta
+            una pista única con obstáculos mecánicos que el jugador debe esquivar para mantener
+            su avance. Gana quien cruce primero la línea de meta en la ronda final.
+          </p>
+        </div>
+        <div class="glass rounded-2xl p-8 hover:border-accent/30 transition-all duration-300">
+          <div class="text-4xl mb-4">🎮</div>
+          <h3 class="text-xl font-bold mb-3">Gameplay</h3>
+          <p class="text-gray-400 leading-relaxed">
+            El jugador avanza automáticamente por un camino spline 3D. Debe esquivar obstáculos
+            (picos, martillos, péndulos, puertas giratorias, etc.) usando teclado o gamepad.
+            Un solo botón basta para avanzar; la habilidad está en el timing para evitar obstáculos.
+          </p>
+        </div>
+        <div class="glass rounded-2xl p-8 hover:border-accent/30 transition-all duration-300">
+          <div class="text-4xl mb-4">🌐</div>
+          <h3 class="text-xl font-bold mb-3">Online Multiplayer</h3>
+          <p class="text-gray-400 leading-relaxed">
+            Partidas privadas 1v1 con código de sala de 6 caracteres. Usa Photon Fusion 2 en
+            modo Shared para sincronización en tiempo real. Sistema host/join: el anfitrión
+            genera el código y el invitado ingresa para unirse.
+          </p>
+        </div>
+        <div class="glass rounded-2xl p-8 hover:border-accent/30 transition-all duration-300">
+          <div class="text-4xl mb-4">🎨</div>
+          <h3 class="text-xl font-bold mb-3">Estilo Visual</h3>
+          <p class="text-gray-400 leading-relaxed">
+            Estilo low-poly con iluminación URP, cielo dinámico (Tenkoku), agua realista (Suimono),
+            y efectos de post-procesado (profundidad de campo, ajustes de color, bloom). Personajes
+            rojo y azul con animaciones de correr, caer, escalar, ganar y perder.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== TECNOLOGÍAS ========== -->
+  <section id="tecnologias" class="py-24 px-6 bg-deeper/50">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16">
+        <span class="text-accent text-sm font-semibold uppercase tracking-widest">Stack Tecnológico</span>
+        <h2 class="text-4xl md:text-5xl font-black mt-3">Tecnologías <span class="text-accent">Utilizadas</span></h2>
+      </div>
+      <div class="grid md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">🎮</div>
+          <h4 class="font-bold text-sm">Unity 6000.4.0f1</h4>
+          <p class="text-gray-500 text-xs mt-1">Motor de juego (Unity 6)</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">🌐</div>
+          <h4 class="font-bold text-sm">Photon Fusion 2</h4>
+          <p class="text-gray-500 text-xs mt-1">Networking multiplayer</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">🎨</div>
+          <h4 class="font-bold text-sm">URP 17.4.0</h4>
+          <p class="text-gray-500 text-xs mt-1">Render pipeline</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">📸</div>
+          <h4 class="font-bold text-sm">Cinemachine 2.10.6</h4>
+          <p class="text-gray-500 text-xs mt-1">Sistema de cámaras</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">⌨️</div>
+          <h4 class="font-bold text-sm">Input System 1.19.0</h4>
+          <p class="text-gray-500 text-xs mt-1">Teclado + Gamepad</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">🧱</div>
+          <h4 class="font-bold text-sm">ProBuilder 6.0.9</h4>
+          <p class="text-gray-500 text-xs mt-1">Geometría de niveles</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">☁️</div>
+          <h4 class="font-bold text-sm">Tenkoku Dynamic Sky</h4>
+          <p class="text-gray-500 text-xs mt-1">Cielo dinámico</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">💧</div>
+          <h4 class="font-bold text-sm">Suimono Water System</h4>
+          <p class="text-gray-500 text-xs mt-1">Agua realista</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">📜</div>
+          <h4 class="font-bold text-sm">C#</h4>
+          <p class="text-gray-500 text-xs mt-1">Lógica de juego (~25 scripts)</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">🌍</div>
+          <h4 class="font-bold text-sm">WebGL</h4>
+          <p class="text-gray-500 text-xs mt-1">Plataforma de despliegue</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">🛠️</div>
+          <h4 class="font-bold text-sm">TextMesh Pro</h4>
+          <p class="text-gray-500 text-xs mt-1">Textos UI</p>
+        </div>
+        <div class="glass rounded-xl p-5 text-center hover:border-accent/20 transition-all">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">🎬</div>
+          <h4 class="font-bold text-sm">Post Processing 3.5.1</h4>
+          <p class="text-gray-500 text-xs mt-1">Efectos visuales</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== NIVELES ========== -->
+  <section id="niveles" class="py-24 px-6">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16">
+        <span class="text-accent text-sm font-semibold uppercase tracking-widest">Las Pistas</span>
+        <h2 class="text-4xl md:text-5xl font-black mt-3">5 Niveles de <span class="text-accent">Dificultad Creciente</span></h2>
+        <p class="text-gray-400 mt-4">Cada ronda presenta un circuito único con obstáculos distintos y mayor complejidad.</p>
+      </div>
+      <div class="grid md:grid-cols-5 gap-4">
+        <div class="glass rounded-2xl p-6 hover:border-redp/30 transition-all group">
+          <div class="text-3xl font-black text-redp mb-2">01</div>
+          <h3 class="text-lg font-bold mb-1">Nivel 1</h3>
+          <div class="text-sm text-gray-500 mb-3">480m de pista</div>
+          <ul class="text-xs text-gray-400 space-y-1.5">
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-redp shrink-0"></span>Torus giratorios</li>
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-redp shrink-0"></span>Bloques deslizantes</li>
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-redp shrink-0"></span>Obstáculos básicos</li>
+          </ul>
+        </div>
+        <div class="glass rounded-2xl p-6 hover:border-accent/30 transition-all group">
+          <div class="text-3xl font-black text-accent mb-2">02</div>
+          <h3 class="text-lg font-bold mb-1">Nivel 2</h3>
+          <div class="text-sm text-gray-500 mb-3">309m de pista</div>
+          <ul class="text-xs text-gray-400 space-y-1.5">
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-accent shrink-0"></span>Picos ascendentes</li>
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-accent shrink-0"></span>Moledoras giratorias</li>
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-accent shrink-0"></span>Plataformas móviles</li>
+          </ul>
+        </div>
+        <div class="glass rounded-2xl p-6 hover:border-yellow-400/30 transition-all group">
+          <div class="text-3xl font-black text-yellow-400 mb-2">03</div>
+          <h3 class="text-lg font-bold mb-1">Nivel 3</h3>
+          <div class="text-sm text-gray-500 mb-3">372m de pista</div>
+          <ul class="text-xs text-gray-400 space-y-1.5">
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0"></span>7 péndulos oscilantes</li>
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0"></span>Cuchillas giratorias</li>
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0"></span>Sincronización compleja</li>
+          </ul>
+        </div>
+        <div class="glass rounded-2xl p-6 hover:border-green-400/30 transition-all group">
+          <div class="text-3xl font-black text-green-400 mb-2">04</div>
+          <h3 class="text-lg font-bold mb-1">Nivel 4</h3>
+          <div class="text-sm text-gray-500 mb-3">387m de pista</div>
+          <ul class="text-xs text-gray-400 space-y-1.5">
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0"></span>Martillos neumáticos</li>
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0"></span>Sección de escalada</li>
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0"></span>Guantes de boxeo</li>
+          </ul>
+        </div>
+        <div class="glass rounded-2xl p-6 hover:border-bluep/30 transition-all group">
+          <div class="text-3xl font-black text-bluep mb-2">05</div>
+          <h3 class="text-lg font-bold mb-1">Nivel 5</h3>
+          <div class="text-sm text-gray-500 mb-3">632m de pista</div>
+          <ul class="text-xs text-gray-400 space-y-1.5">
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-bluep shrink-0"></span>Puertas rotatorias</li>
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-bluep shrink-0"></span>Ruedas gigantes</li>
+            <li class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-bluep shrink-0"></span>Combinación total</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Distancias visuales -->
+      <div class="mt-12 glass rounded-2xl p-6 md:p-8">
+        <h4 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Longitud de pistas</h4>
+        <div class="space-y-4">
+          <div>
+            <div class="flex justify-between text-sm mb-1"><span class="text-redp font-bold">N1</span><span class="text-gray-500">480m</span></div>
+            <div class="h-3 bg-deeper rounded-full overflow-hidden">
+              <div class="h-full bg-redp rounded-full animate-bar" style="width: 76%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between text-sm mb-1"><span class="text-accent font-bold">N2</span><span class="text-gray-500">309m</span></div>
+            <div class="h-3 bg-deeper rounded-full overflow-hidden">
+              <div class="h-full bg-accent rounded-full animate-bar" style="width: 49%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between text-sm mb-1"><span class="text-yellow-400 font-bold">N3</span><span class="text-gray-500">372m</span></div>
+            <div class="h-3 bg-deeper rounded-full overflow-hidden">
+              <div class="h-full bg-yellow-400 rounded-full animate-bar" style="width: 59%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between text-sm mb-1"><span class="text-green-400 font-bold">N4</span><span class="text-gray-500">387m</span></div>
+            <div class="h-3 bg-deeper rounded-full overflow-hidden">
+              <div class="h-full bg-green-400 rounded-full animate-bar" style="width: 61%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between text-sm mb-1"><span class="text-bluep font-bold">N5</span><span class="text-gray-500">632m</span></div>
+            <div class="h-3 bg-deeper rounded-full overflow-hidden">
+              <div class="h-full bg-bluep rounded-full animate-bar" style="width: 100%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== MECÁNICAS ========== -->
+  <section id="mecanicas" class="py-24 px-6 bg-deeper/50">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16">
+        <span class="text-accent text-sm font-semibold uppercase tracking-widest">Gameplay</span>
+        <h2 class="text-4xl md:text-5xl font-black mt-3">Mecánicas del <span class="text-accent">Juego</span></h2>
+      </div>
+      <div class="grid md:grid-cols-3 gap-8">
+        <!-- Movimiento -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center text-xl">🏃</div>
+            <h3 class="font-bold">Movimiento</h3>
+          </div>
+          <p class="text-sm text-gray-400 leading-relaxed">
+            El jugador se desplaza sobre un camino spline 3D usando <span class="text-accent font-mono text-xs">Rigidbody.MovePosition()</span>.
+            Un sistema de <span class="text-gray-300">ground probing</span> con BoxCast mantiene al personaje
+            pegado al suelo, rechazando superficies empinadas y colisionadores de obstáculos.
+          </p>
+          <div class="mt-3 text-xs text-gray-500">Velocidad constante: 12 u/s &middot; Física cinemática</div>
+        </div>
+        <!-- Obstáculos -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-redp/10 flex items-center justify-center text-xl">⚡</div>
+            <h3 class="font-bold">Sistema de Obstáculos</h3>
+          </div>
+          <p class="text-sm text-gray-400 leading-relaxed">
+            Cada obstáculo tiene un tipo de colisión con respuesta específica:
+            <span class="text-redp">SpikeBackUpLeft</span>,
+            <span class="text-redp">SpikeUpForward</span>,
+            <span class="text-redp">GenericStrong</span>, etc.
+            Al ser golpeado, el jugador retrocede y se activa un respawn de 2 segundos.
+          </p>
+        </div>
+        <!-- Respawn -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-yellow-400/10 flex items-center justify-center text-xl">🔄</div>
+            <h3 class="font-bold">Ciclo de Ronda</h3>
+          </div>
+          <p class="text-sm text-gray-400 leading-relaxed">
+            <span class="text-gray-300">WaitingForPlayers</span> →
+            <span class="text-accent">Racing</span> →
+            <span class="text-green-400">RoundResult</span> →
+            <span class="text-accent">Racing</span> (siguiente ronda).
+            Tras 5 rondas: <span class="text-bluep">MatchComplete</span> → retorno al lobby.
+          </p>
+          <div class="mt-3 text-xs text-gray-500">El primero en llegar a la meta gana la ronda.</div>
+        </div>
+        <!-- Escalada -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-green-400/10 flex items-center justify-center text-xl">🧗</div>
+            <h3 class="font-bold">Escalada (Nivel 4)</h3>
+          </div>
+          <p class="text-sm text-gray-400 leading-relaxed">
+            En el nivel 4 hay una sección vertical donde el jugador desactiva la gravedad
+            y se mueve a lo largo de una pared. Mecánica única que rompe con el desplazamiento horizontal.
+          </p>
+        </div>
+        <!-- Animaciones -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-bluep/10 flex items-center justify-center text-xl">🎬</div>
+            <h3 class="font-bold">Animaciones</h3>
+          </div>
+          <p class="text-sm text-gray-400 leading-relaxed">
+            Personajes con animaciones completas: correr, caer, escalar, <span class="text-green-400">victoria</span>
+            y <span class="text-redp">derrota</span>. Controladas por <span class="font-mono text-xs">Animator</span>
+            y sincronizadas en red mediante estados replicados.
+          </p>
+        </div>
+        <!-- Audio -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-purple-400/10 flex items-center justify-center text-xl">🔊</div>
+            <h3 class="font-bold">Sistema de Audio</h3>
+          </div>
+          <p class="text-sm text-gray-400 leading-relaxed">
+            Música de menú y gameplay, loops de paso, SFX de muerte y victoria.
+            Gestión centralizada con <span class="font-mono text-xs">OnlineAudioDirector</span>
+            y audio espacial sincronizado por red mediante nonces.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== MULTIJUGADOR ========== -->
+  <section id="multijugador" class="py-24 px-6">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16">
+        <span class="text-accent text-sm font-semibold uppercase tracking-widest">Networking</span>
+        <h2 class="text-4xl md:text-5xl font-black mt-3">Arquitectura <span class="text-accent">Multijugador</span></h2>
+      </div>
+      <div class="grid md:grid-cols-2 gap-8 mb-12">
+        <div class="glass rounded-2xl p-6 md:p-8">
+          <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
+            <span class="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center text-sm">🔌</span>
+            Photon Fusion 2 — Shared Mode
+          </h3>
+          <ul class="space-y-3 text-sm text-gray-400">
+            <li class="flex items-start gap-3">
+              <span class="text-accent mt-0.5">▸</span>
+              <span><strong class="text-gray-200">Modo Shared:</strong> 2 jugadores conectados a una sala compartida. Sin servidor dedicado.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-accent mt-0.5">▸</span>
+              <span><strong class="text-gray-200">Código de sala:</strong> 6 caracteres alfanuméricos generados criptográficamente.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-accent mt-0.5">▸</span>
+              <span><strong class="text-gray-200">Host:</strong> Crea la sala, es Master Client y Scene Authority. Controla el estado de la partida.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-accent mt-0.5">▸</span>
+              <span><strong class="text-gray-200">Joiner:</strong> Ingresa el código y se conecta como cliente. Se le asigna el slot rojo.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-accent mt-0.5">▸</span>
+              <span><strong class="text-gray-200">Slots:</strong> Azul (host) y Rojo (joiner), con carriles separados 0.9u.</span>
+            </li>
+          </ul>
+        </div>
+        <div class="glass rounded-2xl p-6 md:p-8">
+          <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
+            <span class="w-8 h-8 rounded-lg bg-bluep/10 flex items-center justify-center text-sm">📦</span>
+            Objetos Sincronizados
+          </h3>
+          <ul class="space-y-3 text-sm text-gray-400">
+            <li class="flex items-start gap-3">
+              <span class="text-bluep mt-0.5">▸</span>
+              <span><strong class="text-gray-200">NetworkRaceManager:</strong> Singleton que sincroniza la máquina de estados de la carrera.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-bluep mt-0.5">▸</span>
+              <span><strong class="text-gray-200">RunnerNetworkPlayer:</strong> Progreso en la pista, posición/rotación, estado de movimiento, respawn.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-bluep mt-0.5">▸</span>
+              <span><strong class="text-gray-200">Input:</strong> Solo el booleano MoveHeld se transmite como input de red.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-bluep mt-0.5">▸</span>
+              <span><strong class="text-gray-200">RPCs:</strong> RPC_ReportPlayerFinished para declarar ganador de ronda.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-bluep mt-0.5">▸</span>
+              <span><strong class="text-gray-200">Audio:</strong> HazardHitAudioNonce sincroniza eventos de sonido en red.</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Diagrama de flujo textual -->
+      <div class="glass rounded-2xl p-6 md:p-8 max-w-3xl mx-auto">
+        <h4 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Ciclo de vida de una partida</h4>
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <span class="px-3 py-1.5 rounded-lg bg-accent/10 text-accent font-medium">Bootstrap</span>
+          <span class="text-gray-600">→</span>
+          <span class="px-3 py-1.5 rounded-lg bg-green-400/10 text-green-400 font-medium">Host crea sala</span>
+          <span class="text-gray-600">→</span>
+          <span class="px-3 py-1.5 rounded-lg bg-bluep/10 text-bluep font-medium">Joiner ingresa código</span>
+          <span class="text-gray-600">→</span>
+          <span class="px-3 py-1.5 rounded-lg bg-accent/10 text-accent font-medium">Carga Joc.unity</span>
+          <span class="text-gray-600">→</span>
+          <span class="px-3 py-1.5 rounded-lg bg-redp/10 text-redp font-medium">5 rondas</span>
+          <span class="text-gray-600">→</span>
+          <span class="px-3 py-1.5 rounded-lg bg-green-400/10 text-green-400 font-medium">Match Complete</span>
+          <span class="text-gray-600">→</span>
+          <span class="px-3 py-1.5 rounded-lg bg-gray-700/50 text-gray-400 font-medium">Vuelta a Bootstrap</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== ARQUITECTURA ========== -->
+  <section id="arquitectura" class="py-24 px-6 bg-deeper/50">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16">
+        <span class="text-accent text-sm font-semibold uppercase tracking-widest">Estructura</span>
+        <h2 class="text-4xl md:text-5xl font-black mt-3">Arquitectura del <span class="text-accent">Proyecto</span></h2>
+      </div>
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="glass rounded-2xl p-6">
+          <h3 class="font-bold text-lg mb-3 flex items-center gap-2">
+            <span class="text-accent">📁</span> Scripts Core
+          </h3>
+          <ul class="text-xs text-gray-400 space-y-2 font-mono">
+            <li class="hover:text-accent transition-colors">Online/SessionBootstrapper.cs</li>
+            <li class="hover:text-accent transition-colors">Online/NetworkRaceManager.cs</li>
+            <li class="hover:text-accent transition-colors">Online/RunnerNetworkPlayer.cs</li>
+            <li class="hover:text-accent transition-colors">Online/RunnerMotor.cs</li>
+            <li class="hover:text-accent transition-colors">Online/RunnerInputAdapter.cs</li>
+            <li class="hover:text-accent transition-colors">Online/RunnerPresentation.cs</li>
+            <li class="hover:text-accent transition-colors">Online/RunnerAudioFeedback.cs</li>
+            <li class="hover:text-accent transition-colors">Online/LocalMatchHudController.cs</li>
+            <li class="hover:text-accent transition-colors">Online/ObstacleManager.cs</li>
+          </ul>
+        </div>
+        <div class="glass rounded-2xl p-6">
+          <h3 class="font-bold text-lg mb-3 flex items-center gap-2">
+            <span class="text-bluep">📁</span> Escenas
+          </h3>
+          <ul class="text-xs text-gray-400 space-y-2 font-mono">
+            <li class="hover:text-bluep transition-colors">Scenes/Bootstrap.unity</li>
+            <li class="text-gray-500 ml-4">— Menú / Lobby (IMGUI)</li>
+            <li class="hover:text-bluep transition-colors">Scenes/Joc.unity</li>
+            <li class="text-gray-500 ml-4">— Pistas + obstáculos</li>
+            <li class="text-gray-500 ml-4">— 5 niveles en una escena</li>
+            <li class="hover:text-bluep transition-colors">Scenes/Joc_Profiles/</li>
+            <li class="text-gray-500 ml-4">— Datos de perfilado</li>
+          </ul>
+        </div>
+        <div class="glass rounded-2xl p-6">
+          <h3 class="font-bold text-lg mb-3 flex items-center gap-2">
+            <span class="text-green-400">📁</span> Assets & Config
+          </h3>
+          <ul class="text-xs text-gray-400 space-y-2 font-mono">
+            <li class="hover:text-green-400 transition-colors">Resources/NetworkRaceManager.prefab</li>
+            <li class="hover:text-green-400 transition-colors">Resources/RunnerNetworkPlayer.prefab</li>
+            <li class="hover:text-green-400 transition-colors">Resources/OnlineAudioProfile.asset</li>
+            <li class="hover:text-green-400 transition-colors">personatge/ (modelos + animaciones)</li>
+            <li class="hover:text-green-400 transition-colors">music/ (audio clips)</li>
+            <li class="text-gray-500 ml-4">10+ archivos de audio</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== OBSTÁCULOS ========== -->
+  <section class="py-24 px-6">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16">
+        <span class="text-accent text-sm font-semibold uppercase tracking-widest">Peligros</span>
+        <h2 class="text-4xl md:text-5xl font-black mt-3">Tipos de <span class="text-accent">Obstáculos</span></h2>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="glass rounded-xl p-4 text-center hover:border-redp/30 transition-all">
+          <div class="text-3xl mb-2">🔺</div>
+          <h4 class="font-bold text-sm">Picos</h4>
+          <p class="text-xs text-gray-500">Plataformas que suben y bajan</p>
+        </div>
+        <div class="glass rounded-xl p-4 text-center hover:border-accent/30 transition-all">
+          <div class="text-3xl mb-2">⭕</div>
+          <h4 class="font-bold text-sm">Torus</h4>
+          <p class="text-xs text-gray-500">Anillos rotatorios</p>
+        </div>
+        <div class="glass rounded-xl p-4 text-center hover:border-yellow-400/30 transition-all">
+          <div class="text-3xl mb-2">🔩</div>
+          <h4 class="font-bold text-sm">Péndulos</h4>
+          <p class="text-xs text-gray-500">Oscilación sinusoidal</p>
+        </div>
+        <div class="glass rounded-xl p-4 text-center hover:border-green-400/30 transition-all">
+          <div class="text-3xl mb-2">🔨</div>
+          <h4 class="font-bold text-sm">Martillos</h4>
+          <p class="text-xs text-gray-500">Caída vertical</p>
+        </div>
+        <div class="glass rounded-xl p-4 text-center hover:border-bluep/30 transition-all">
+          <div class="text-3xl mb-2">🚪</div>
+          <h4 class="font-bold text-sm">Puertas</h4>
+          <p class="text-xs text-gray-500">Paneles rotatorios</p>
+        </div>
+        <div class="glass rounded-xl p-4 text-center hover:border-purple-400/30 transition-all">
+          <div class="text-3xl mb-2">⚙️</div>
+          <h4 class="font-bold text-sm">Moledoras</h4>
+          <p class="text-xs text-gray-500">Discos giratorios</p>
+        </div>
+        <div class="glass rounded-xl p-4 text-center hover:border-pink-400/30 transition-all">
+          <div class="text-3xl mb-2">🥊</div>
+          <h4 class="font-bold text-sm">Guantes</h4>
+          <p class="text-xs text-gray-500">Empujones laterales</p>
+        </div>
+        <div class="glass rounded-xl p-4 text-center hover:border-cyan-400/30 transition-all">
+          <div class="text-3xl mb-2">🔪</div>
+          <h4 class="font-bold text-sm">Cuchillas</h4>
+          <p class="text-xs text-gray-500">Aspas giratorias</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== VISUAL ========== -->
+  <section class="py-24 px-6 bg-deeper/50">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16">
+        <span class="text-accent text-sm font-semibold uppercase tracking-widest">Presentación</span>
+        <h2 class="text-4xl md:text-5xl font-black mt-3">Apartado <span class="text-accent">Visual</span></h2>
+      </div>
+      <div class="grid md:grid-cols-3 gap-8">
+        <div class="glass rounded-2xl p-6 text-center">
+          <div class="text-5xl mb-4">🎨</div>
+          <h3 class="font-bold text-lg mb-2">Estilo Low-Poly</h3>
+          <p class="text-sm text-gray-400">
+            Geometría estilizada con materiales PBR (metal pulido, acero cepillado,
+            latón, cubierta industrial). Iluminación realista con URP.
+          </p>
+        </div>
+        <div class="glass rounded-2xl p-6 text-center">
+          <div class="text-5xl mb-4">☀️</div>
+          <h3 class="font-bold text-lg mb-2">Cielo Dinámico</h3>
+          <p class="text-sm text-gray-400">
+            Tenkoku Dynamic Sky aporta nubes volumétricas, campo estelar,
+            y posición solar variable que cambia la atmósfera de cada nivel.
+          </p>
+        </div>
+        <div class="glass rounded-2xl p-6 text-center">
+          <div class="text-5xl mb-4">💧</div>
+          <h3 class="font-bold text-lg mb-2">Agua Realista</h3>
+          <p class="text-sm text-gray-400">
+            Suimono Water System renderiza agua con reflejos, refracción
+            y ondas. Los bloques de agua se generan proceduralmente en cuadrícula.
+          </p>
+        </div>
+      </div>
+      <div class="mt-8 glass rounded-2xl p-6">
+        <h3 class="font-bold text-center mb-4">Efectos de Post-Procesado</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center text-sm">
+          <div class="p-3 rounded-xl bg-deeper">
+            <span class="text-accent font-bold block">Profundidad de Campo</span>
+            <span class="text-gray-500 text-xs">Blur en menús/pausa</span>
+          </div>
+          <div class="p-3 rounded-xl bg-deeper">
+            <span class="text-accent font-bold block">Ajustes de Color</span>
+            <span class="text-gray-500 text-xs">Exposición en transiciones</span>
+          </div>
+          <div class="p-3 rounded-xl bg-deeper">
+            <span class="text-accent font-bold block">Saturación</span>
+            <span class="text-gray-500 text-xs">Invuulnerabilidad (debug)</span>
+          </div>
+          <div class="p-3 rounded-xl bg-deeper">
+            <span class="text-accent font-bold block">Exposición</span>
+            <span class="text-gray-500 text-xs">Flash blanco entre niveles</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== CONTROLES ========== -->
+  <section class="py-24 px-6">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16">
+        <span class="text-accent text-sm font-semibold uppercase tracking-widest">Input</span>
+        <h2 class="text-4xl md:text-5xl font-black mt-3">Controles <span class="text-accent">Soportados</span></h2>
+      </div>
+      <div class="max-w-lg mx-auto glass rounded-2xl p-8">
+        <div class="space-y-4">
+          <div class="flex items-center justify-between p-3 rounded-xl bg-deeper">
+            <span class="text-sm font-medium">Jugador Rojo</span>
+            <span class="text-xs text-gray-400">W / ↑ / Espacio</span>
+          </div>
+          <div class="flex items-center justify-between p-3 rounded-xl bg-deeper">
+            <span class="text-sm font-medium">Jugador Azul</span>
+            <span class="text-xs text-gray-400">↑ (flecha arriba)</span>
+          </div>
+          <div class="flex items-center justify-between p-3 rounded-xl bg-deeper">
+            <span class="text-sm font-medium">Gamepad</span>
+            <span class="text-xs text-gray-400">Botón sur / stick izquierdo arriba</span>
+          </div>
+          <div class="flex items-center justify-between p-3 rounded-xl bg-deeper">
+            <span class="text-sm font-medium">Pausa</span>
+            <span class="text-xs text-gray-400">Escape</span>
+          </div>
+          <div class="flex items-center justify-between p-3 rounded-xl bg-deeper">
+            <span class="text-sm font-medium">Debug (editor)</span>
+            <span class="text-xs text-gray-400">F3 / G (invulnerabilidad)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== FOOTER ========== -->
+  <footer class="border-t border-white/5 py-12 px-6">
+    <div class="max-w-6xl mx-auto text-center">
+      <div class="text-2xl font-black mb-2">
+        <span class="text-accent">Runner</span><span class="text-white">Game</span><span class="text-gray-500 font-normal text-sm ml-1">3D</span>
+      </div>
+      <p class="text-gray-600 text-sm">
+        Desarrollado con Unity 6 &middot; Photon Fusion 2 &middot; URP
+      </p>
+      <p class="text-gray-700 text-xs mt-4">
+        Nicolas Delgado, Oskar Ortiz, Diery Valencia &mdash; Diseño de Software &mdash; 2026
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>
