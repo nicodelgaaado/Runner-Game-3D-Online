@@ -7,9 +7,12 @@ namespace RunnerGame.Online
 {
     public class LocalPlayerCameraBinder : MonoBehaviour
     {
-        [SerializeField] private float followDistance = 24f;
-        [SerializeField] private float followHeight = 18f;
-        [SerializeField] private float smoothing = 8f;
+        [SerializeField] private float followDistance = 14f;
+        [SerializeField] private float followHeight = 7.5f;
+        [SerializeField] private float lookAheadDistance = 8f;
+        [SerializeField] private float lookAtHeight = 4f;
+        [SerializeField] private float fieldOfView = 66f;
+        [SerializeField] private float smoothing = 10f;
 
         private Camera fallbackCamera;
         private Transform followTarget;
@@ -249,11 +252,13 @@ namespace RunnerGame.Online
                 return;
             }
 
-            Vector3 desiredPosition = followTarget.position - (followTarget.forward * followDistance) + (Vector3.up * followHeight);
+            ApplyFallbackCameraLens();
+
+            Vector3 desiredPosition = GetDesiredCameraPosition();
             Transform cameraTransform = fallbackCamera.transform;
             cameraTransform.position = Vector3.Lerp(cameraTransform.position, desiredPosition, Time.deltaTime * smoothing);
 
-            Quaternion targetRotation = Quaternion.LookRotation(followTarget.position + (Vector3.up * 6f) - cameraTransform.position, Vector3.up);
+            Quaternion targetRotation = Quaternion.LookRotation(GetLookTarget() - cameraTransform.position, Vector3.up);
             cameraTransform.rotation = Quaternion.Slerp(cameraTransform.rotation, targetRotation, Time.deltaTime * smoothing);
         }
 
@@ -269,11 +274,30 @@ namespace RunnerGame.Online
             cameraObject.AddComponent<AudioListener>();
             fallbackCamera.tag = "MainCamera";
             fallbackCamera.depth = 10f;
+            ApplyFallbackCameraLens();
 
-            Vector3 desiredPosition = followTarget.position - (followTarget.forward * followDistance) + (Vector3.up * followHeight);
+            Vector3 desiredPosition = GetDesiredCameraPosition();
             cameraObject.transform.SetPositionAndRotation(
                 desiredPosition,
-                Quaternion.LookRotation(followTarget.position + (Vector3.up * 6f) - desiredPosition, Vector3.up));
+                Quaternion.LookRotation(GetLookTarget() - desiredPosition, Vector3.up));
+        }
+
+        private Vector3 GetDesiredCameraPosition()
+        {
+            return followTarget.position - (followTarget.forward * followDistance) + (Vector3.up * followHeight);
+        }
+
+        private Vector3 GetLookTarget()
+        {
+            return followTarget.position + (followTarget.forward * lookAheadDistance) + (Vector3.up * lookAtHeight);
+        }
+
+        private void ApplyFallbackCameraLens()
+        {
+            if (fallbackCamera != null)
+            {
+                fallbackCamera.fieldOfView = fieldOfView;
+            }
         }
 
         private void DisposeFallbackCamera()

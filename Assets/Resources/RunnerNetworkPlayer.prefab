@@ -156,9 +156,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 77fb1953fbe08884bb6f7f210c7bbc3a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RunnerGame.Online.LocalPlayerCameraBinder
-  followDistance: 24
-  followHeight: 18
-  smoothing: 8
+  followDistance: 14
+  followHeight: 7.5
+  lookAheadDistance: 8
+  lookAtHeight: 4
+  fieldOfView: 66
+  smoothing: 10
 --- !u!114 &1000000000011
 MonoBehaviour:
   m_ObjectHideFlags: 0

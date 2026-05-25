@@ -145,7 +145,8 @@ namespace RunnerGame.Online
         private const string PlayerPrefabResourcePath = "RunnerNetworkPlayer";
         private const string RaceManagerPrefabResourcePath = "NetworkRaceManager";
         private const string RunnerObjectName = "FusionRunner";
-        private const string RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        internal const int RoomCodeLength = 6;
+        internal const string RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
         private const int MaxStartAttempts = 3;
         private const int StartRetryDelayMilliseconds = 1500;
         private const float GameplayLoadWatchdogTimeoutSeconds = 12f;
@@ -162,7 +163,6 @@ namespace RunnerGame.Online
 
         private readonly HashSet<PlayerRef> activePlayers = new();
 
-        private string joinCodeInput = string.Empty;
         private string statusMessage = "Ready. Host a match or join with a code.";
         private BootstrapState state = BootstrapState.Ready;
         private bool sceneLoadRequested;
@@ -193,12 +193,55 @@ namespace RunnerGame.Online
         private float bootstrapLinearFogEnd;
         private Color bootstrapSubtractiveShadowColor;
         private OnlineAudioDirector audioDirector;
+        private bool showBootstrapDebug;
+        private BootstrapMenuView bootstrapMenuView;
+
+        [SerializeField]
+        private Font bootstrapMenuFont = null;
 
         public static SessionBootstrapper Instance { get; private set; }
 
         public NetworkRunner Runner => runner;
         public string CurrentSessionCode => SessionRuntime.SessionCode;
         public int CurrentPlayerCount => activePlayers.Count;
+
+        public readonly struct BootstrapMenuSnapshot
+        {
+            public BootstrapMenuSnapshot(
+                bool shouldShowMenu,
+                string statusMessage,
+                string sessionCode,
+                int playerCount,
+                int maxPlayers,
+                bool canStartSession,
+                bool showSessionInfo,
+                bool canLeaveSession,
+                bool showDebugPanel,
+                string debugDetails)
+            {
+                ShouldShowMenu = shouldShowMenu;
+                StatusMessage = statusMessage;
+                SessionCode = sessionCode;
+                PlayerCount = playerCount;
+                MaxPlayers = maxPlayers;
+                CanStartSession = canStartSession;
+                ShowSessionInfo = showSessionInfo;
+                CanLeaveSession = canLeaveSession;
+                ShowDebugPanel = showDebugPanel;
+                DebugDetails = debugDetails;
+            }
+
+            public bool ShouldShowMenu { get; }
+            public string StatusMessage { get; }
+            public string SessionCode { get; }
+            public int PlayerCount { get; }
+            public int MaxPlayers { get; }
+            public bool CanStartSession { get; }
+            public bool ShowSessionInfo { get; }
+            public bool CanLeaveSession { get; }
+            public bool ShowDebugPanel { get; }
+            public string DebugDetails { get; }
+        }
 
         private void Awake()
         {
@@ -213,6 +256,8 @@ namespace RunnerGame.Online
             ConfigureRuntimeForCurrentPlatform();
             CaptureBootstrapRenderSettings();
             EnsureAudioDirector().PlayMenuLoop();
+            EnsureBootstrapMenuView();
+            RefreshBootstrapMenu();
         }
 
         private void OnDestroy()
@@ -243,12 +288,12 @@ namespace RunnerGame.Online
 
         public async Task JoinPrivateMatchAsync(string joinCode)
         {
-            if (!CanStartNewSession() || string.IsNullOrWhiteSpace(joinCode))
+            string normalizedCode = NormalizeRoomCodeInput(joinCode);
+            if (!CanStartNewSession() || !IsValidRoomCode(normalizedCode))
             {
                 return;
             }
 
-            string normalizedCode = joinCode.Trim().ToUpperInvariant();
             state = BootstrapState.JoiningSession;
             statusMessage = $"Joining private room {normalizedCode}...";
             await StartSessionAsync(normalizedCode);
@@ -263,6 +308,59 @@ namespace RunnerGame.Online
 
             EnsureAudioDirector().SetGameplayMusicPaused(false);
             _ = LeaveSessionInternalAsync(loadBootstrapScene: true, "Returned to menu.");
+        }
+
+        public BootstrapMenuSnapshot CreateMenuSnapshot()
+        {
+            bool hasRunningSession = HasRunningRunner(runner);
+            string sessionCode = SessionRuntime.SessionCode;
+            int playerCount = GetMenuPlayerCount(runner);
+            bool showDebugPanel = Debug.isDebugBuild && showBootstrapDebug;
+            return new BootstrapMenuSnapshot(
+                ShouldShowBootstrapGui(),
+                statusMessage,
+                sessionCode,
+                playerCount,
+                MaxPlayers,
+                CanStartNewSession(),
+                hasRunningSession || !string.IsNullOrWhiteSpace(sessionCode),
+                hasRunningSession && !leavingSession,
+                showDebugPanel,
+                showDebugPanel ? BuildBootstrapDebugDetails() : string.Empty);
+        }
+
+        public void SubmitHostFromMenu()
+        {
+            if (!CanStartNewSession())
+            {
+                return;
+            }
+
+            EnsureAudioDirector().PlayUiSelect();
+            _ = CreatePrivateMatchAsync();
+        }
+
+        public void SubmitJoinFromMenu(string joinCode)
+        {
+            string normalizedCode = NormalizeRoomCodeInput(joinCode);
+            if (!CanStartNewSession() || !IsValidRoomCode(normalizedCode))
+            {
+                return;
+            }
+
+            EnsureAudioDirector().PlayUiSelect();
+            _ = JoinPrivateMatchAsync(normalizedCode);
+        }
+
+        public void SubmitLeaveFromMenu()
+        {
+            if (!HasRunningRunner(runner) || leavingSession)
+            {
+                return;
+            }
+
+            EnsureAudioDirector().PlayUiSelect();
+            LeaveSession();
         }
 
         private bool CanStartNewSession()
@@ -518,7 +616,7 @@ namespace RunnerGame.Online
 
         private static string GenerateRoomCode()
         {
-            char[] buffer = new char[6];
+            char[] buffer = new char[RoomCodeLength];
             byte[] randomBytes = new byte[buffer.Length];
             RandomNumberGenerator.Fill(randomBytes);
             for (int index = 0; index < buffer.Length; index++)
@@ -527,6 +625,44 @@ namespace RunnerGame.Online
             }
 
             return new string(buffer);
+        }
+
+        internal static string NormalizeRoomCodeInput(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new StringBuilder(RoomCodeLength);
+            for (int index = 0; index < value.Length && builder.Length < RoomCodeLength; index++)
+            {
+                char normalizedCharacter = char.ToUpperInvariant(value[index]);
+                if (RoomCodeAlphabet.IndexOf(normalizedCharacter) >= 0)
+                {
+                    builder.Append(normalizedCharacter);
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        internal static bool IsValidRoomCode(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length != RoomCodeLength)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < value.Length; index++)
+            {
+                if (RoomCodeAlphabet.IndexOf(value[index]) < 0)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private void ResetGameplaySpawnState()
@@ -839,6 +975,79 @@ namespace RunnerGame.Online
             return !IsGameplayPresentationActive(runner);
         }
 
+        private int GetMenuPlayerCount(NetworkRunner networkRunner)
+        {
+            if (!HasRunningRunner(networkRunner))
+            {
+                return activePlayers.Count;
+            }
+
+            int count = 0;
+            foreach (PlayerRef activePlayer in networkRunner.ActivePlayers)
+            {
+                if (activePlayer != PlayerRef.None)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private void EnsureBootstrapMenuView()
+        {
+            if (bootstrapMenuView != null)
+            {
+                return;
+            }
+
+            bootstrapMenuView = GetComponentInChildren<BootstrapMenuView>(true);
+            if (bootstrapMenuView == null)
+            {
+                GameObject menuObject = new GameObject("Bootstrap UI Toolkit Menu");
+                menuObject.transform.SetParent(transform, false);
+                menuObject.AddComponent<UnityEngine.UIElements.UIDocument>();
+                bootstrapMenuView = menuObject.AddComponent<BootstrapMenuView>();
+            }
+
+            bootstrapMenuView.Initialize(this, bootstrapMenuFont);
+        }
+
+        private void RefreshBootstrapMenu()
+        {
+            EnsureBootstrapMenuView();
+            bootstrapMenuView.Refresh(CreateMenuSnapshot());
+        }
+
+        private string BuildBootstrapDebugDetails()
+        {
+            NetworkRunner currentRunner = runner;
+            string buildStamp = OnlineBuildSceneResolver.GetBuildStamp();
+            string bootstrapBuildIndex = OnlineBuildSceneResolver.DescribeResolvedBuildIndex(BootstrapSceneName, BootstrapScenePath);
+            string gameplayBuildIndex = OnlineBuildSceneResolver.DescribeResolvedBuildIndex(GameplaySceneName, GameplayScenePath);
+            bool hasRunner = HasRunningRunner(currentRunner);
+
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine($"Build Stamp: {buildStamp}");
+            builder.AppendLine($"Active Unity Scene: {SceneManager.GetActiveScene().name}");
+            builder.AppendLine($"Fusion Scene Info: {DescribeFusionSceneInfo(currentRunner)}");
+            builder.AppendLine($"Bootstrap Build Index: {bootstrapBuildIndex}");
+            builder.AppendLine($"Gameplay Build Index: {gameplayBuildIndex}");
+            builder.AppendLine($"Bootstrap Loaded (Fusion): {IsBootstrapSceneLoadedByFusion(currentRunner)}");
+            builder.AppendLine($"Bootstrap Loaded (Unity): {IsSceneLoadedByUnity(BootstrapSceneName)}");
+            builder.AppendLine($"Gameplay Loaded (Fusion): {IsGameplaySceneLoadedByFusion(currentRunner)}");
+            builder.AppendLine($"Gameplay Loaded (Unity): {IsSceneLoadedByUnity(GameplaySceneName)}");
+            builder.AppendLine($"Host Drives Scene Load: {DrivesSceneLoad(currentRunner)}");
+            builder.AppendLine($"Scene Authority: {hasRunner && currentRunner.IsSceneAuthority}");
+            builder.AppendLine($"Master Client: {hasRunner && currentRunner.IsSharedModeMasterClient}");
+            builder.AppendLine($"Full Room: {GetMenuPlayerCount(currentRunner) >= MaxPlayers}");
+            builder.AppendLine($"Local Player Valid: {IsLocalPlayerReady(currentRunner)}");
+            builder.AppendLine($"Scene Load Requested: {sceneLoadRequested}");
+            builder.AppendLine($"Gameplay Load Pending: {IsGameplayLoadPending()}");
+            builder.Append($"Pending Gameplay Spawns: {HasPendingGameplaySpawns()}");
+            return builder.ToString();
+        }
+
         private void SyncActivePlayersFromRunner(NetworkRunner networkRunner)
         {
             activePlayers.Clear();
@@ -990,6 +1199,13 @@ namespace RunnerGame.Online
 
         private void Update()
         {
+            if (Debug.isDebugBuild && Input.GetKeyDown(KeyCode.F3))
+            {
+                showBootstrapDebug = !showBootstrapDebug;
+            }
+
+            RefreshBootstrapMenu();
+
             if (runner == null || !runner.IsRunning || leavingSession)
             {
                 return;
@@ -1186,73 +1402,6 @@ namespace RunnerGame.Online
             }
 
             EnsureGameplayPresentationReady(sourceRunner, "HandleLocalPlayerSpawnCompleted");
-        }
-
-        private void OnGUI()
-        {
-            if (!ShouldShowBootstrapGui())
-            {
-                return;
-            }
-
-            float areaHeight = Debug.isDebugBuild ? 720f : 360f;
-            Rect area = new Rect((Screen.width * 0.5f) - 220f, (Screen.height * 0.5f) - (areaHeight * 0.5f), 440f, areaHeight);
-            GUILayout.BeginArea(area, GUI.skin.window);
-            GUILayout.Label("Runner Game Online");
-            GUILayout.Space(8f);
-            GUILayout.Label(statusMessage);
-            GUILayout.Space(12f);
-
-            GUI.enabled = state == BootstrapState.Ready || state == BootstrapState.Error;
-            if (GUILayout.Button("Host Private Match"))
-            {
-                EnsureAudioDirector().PlayUiSelect();
-                _ = CreatePrivateMatchAsync();
-            }
-
-            GUILayout.Space(8f);
-            GUILayout.Label("Join Code");
-            joinCodeInput = GUILayout.TextField(joinCodeInput, 16);
-            if (GUILayout.Button("Join Match"))
-            {
-                EnsureAudioDirector().PlayUiSelect();
-                _ = JoinPrivateMatchAsync(joinCodeInput);
-            }
-
-            GUI.enabled = true;
-
-            if (SessionRuntime.Runner != null && SessionRuntime.Runner.IsRunning)
-            {
-                GUILayout.Space(12f);
-                GUILayout.Label($"Room Code: {SessionRuntime.SessionCode}");
-                GUILayout.Label($"Players: {activePlayers.Count}/{MaxPlayers}");
-                GUILayout.Label($"Mode: Shared");
-            }
-
-            if (Debug.isDebugBuild)
-            {
-                GUILayout.Space(12f);
-                GUILayout.Label("Bootstrap Debug");
-                GUILayout.Label($"Build Stamp: {OnlineBuildSceneResolver.GetBuildStamp()}");
-                GUILayout.Label($"Active Unity Scene: {SceneManager.GetActiveScene().name}");
-                GUILayout.Label($"Fusion Scene Info: {DescribeFusionSceneInfo(runner)}");
-                GUILayout.Label($"Bootstrap Build Index: {OnlineBuildSceneResolver.DescribeResolvedBuildIndex(BootstrapSceneName, BootstrapScenePath)}");
-                GUILayout.Label($"Gameplay Build Index: {OnlineBuildSceneResolver.DescribeResolvedBuildIndex(GameplaySceneName, GameplayScenePath)}");
-                GUILayout.Label($"Bootstrap Loaded (Fusion): {IsBootstrapSceneLoadedByFusion(runner)}");
-                GUILayout.Label($"Bootstrap Loaded (Unity): {IsSceneLoadedByUnity(BootstrapSceneName)}");
-                GUILayout.Label($"Gameplay Loaded (Fusion): {IsGameplaySceneLoadedByFusion(runner)}");
-                GUILayout.Label($"Gameplay Loaded (Unity): {IsSceneLoadedByUnity(GameplaySceneName)}");
-                GUILayout.Label($"Host Drives Scene Load: {DrivesSceneLoad(runner)}");
-                GUILayout.Label($"Scene Authority: {HasRunningRunner(runner) && runner.IsSceneAuthority}");
-                GUILayout.Label($"Master Client: {HasRunningRunner(runner) && runner.IsSharedModeMasterClient}");
-                GUILayout.Label($"Full Room: {HasFullRoom(runner)}");
-                GUILayout.Label($"Local Player Valid: {IsLocalPlayerReady(runner)}");
-                GUILayout.Label($"Scene Load Requested: {sceneLoadRequested}");
-                GUILayout.Label($"Gameplay Load Pending: {IsGameplayLoadPending()}");
-                GUILayout.Label($"Pending Gameplay Spawns: {HasPendingGameplaySpawns()}");
-            }
-
-            GUILayout.EndArea();
         }
 
         public void OnPlayerJoined(NetworkRunner networkRunner, PlayerRef player)

@@ -1,0 +1,19 @@
+#join-code-field {
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+}
+
+#join-code-content {
+    align-items: center;
+    justify-content: center;
+}
+
+#join-code-value {
+    -unity-text-align: middle-center;
+    color: rgb(255, 255, 255);
+    white-space: nowrap;
+}
+
+#join-code-caret {
+    background-color: rgb(255, 255, 255);
+}
